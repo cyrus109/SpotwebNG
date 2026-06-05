@@ -1,0 +1,696 @@
+[
+  {
+    "name": "@Home v1",
+    "ssl": null,
+    "plain": {
+      "host": "news.home.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "@Home v2",
+    "ssl": null,
+    "plain": {
+      "host": "newnews.home.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "5eurousenet",
+    "ssl": {
+      "host": "reader.5eurousenet.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "reader.5eurousenet.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "Astraweb",
+    "ssl": {
+      "host": "ssl-eu.astraweb.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "eu.astraweb.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "Blocknews EU",
+    "ssl": {
+      "host": "eunews.blocknews.net",
+      "port": 563
+    },
+    "plain": {
+      "host": "eunews.blocknews.net",
+      "port": 119
+    }
+  },
+  {
+    "name": "Blocknews US",
+    "ssl": {
+      "host": "usnews.blocknews.net",
+      "port": 563
+    },
+    "plain": {
+      "host": "usnews.blocknews.net",
+      "port": 119
+    }
+  },
+  {
+    "name": "Casema",
+    "ssl": null,
+    "plain": {
+      "host": "news.casema.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Cheapnews (block)",
+    "ssl": {
+      "host": "block.cheapnews.eu",
+      "port": 563
+    },
+    "plain": {
+      "host": "block.cheapnews.eu",
+      "port": 119
+    }
+  },
+  {
+    "name": "Cheapnews",
+    "ssl": {
+      "host": "news.cheapnews.eu",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.cheapnews.eu",
+      "port": 119
+    }
+  },
+  {
+    "name": "Dommel",
+    "ssl": null,
+    "plain": {
+      "host": "textnews.dommel.be",
+      "port": 119
+    }
+  },
+  {
+    "name": "Download2day",
+    "ssl": {
+      "host": "reader.download2day.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "reader.download2day.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "EasyNews",
+    "ssl": {
+      "host": "secure.news.easynews.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.easynews.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "EasyNews EU",
+    "ssl": {
+      "host": "secure-eu.news.easynews.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "eu.news.easynews.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "EasyNews US",
+    "ssl": {
+      "host": "secure-us.news.easynews.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "us.news.easynews.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "EasyUsenet",
+    "ssl": {
+      "host": "reader.easyusenet.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "reader.easyusenet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Eweka",
+    "ssl": {
+      "host": "sslreader.eweka.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "newsreader.eweka.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Extreme Usenet",
+    "ssl": {
+      "host": "reader.extremeusenet.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "reader.extremeusenet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "FlexNewz",
+    "ssl": {
+      "host": "news.flexnewz.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.flexnewz.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "Giganews EU",
+    "ssl": {
+      "host": "news-europe.giganews.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news-europe.giganews.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "Giganews US",
+    "ssl": {
+      "host": "news.giganews.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.giganews.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "Hitnews EU",
+    "ssl": {
+      "host": "ssl.hitnews.eu",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.hitnews.eu",
+      "port": 119
+    }
+  },
+  {
+    "name": "Hitnews US",
+    "ssl": {
+      "host": "ssl.hitnews.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.hitnews.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "I-Telligent",
+    "ssl": {
+      "host": "reader.i-telligent.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.i-telligent.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "KPN",
+    "ssl": null,
+    "plain": {
+      "host": "textnews.kpn.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Multiweb",
+    "ssl": null,
+    "plain": {
+      "host": "news.quicknet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Newsconnection",
+    "ssl": {
+      "host": "news.newsconnection.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.newsconnection.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "NewsGrabber",
+    "ssl": {
+      "host": "news.newsgrabber.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.newsgrabber.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Newshosting",
+    "ssl": {
+      "host": "news.newshosting.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.newshosting.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "NewsXS",
+    "ssl": {
+      "host": "reader2.newsxs.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "reader2.newsxs.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Online",
+    "ssl": null,
+    "plain": {
+      "host": "news.online.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "OnsBrabantNet",
+    "ssl": null,
+    "plain": {
+      "host": "news.onsbrabantnet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Premiumize",
+    "ssl": {
+      "host": "usenet.premiumize.me",
+      "port": 1563
+    },
+    "plain": {
+      "host": "usenet.premiumize.me",
+      "port": 1119
+    }
+  },
+  {
+    "name": "PowerNews",
+    "ssl": {
+      "host": "reader.powernews.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "reader.powernews.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Power Usenet",
+    "ssl": {
+      "host": "news.powerusenet.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.powerusenet.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "Pure Usenet",
+    "ssl": {
+      "host": "news.pureusenet.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.pureusenet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Quicknet",
+    "ssl": null,
+    "plain": {
+      "host": "news.quicknet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Supernews EU",
+    "ssl": {
+      "host": "news.eu.supernews.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.eu.supernews.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "Supernews US",
+    "ssl": {
+      "host": "news.supernews.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.supernews.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "SMSUseNET",
+    "ssl": {
+      "host": "news.smsusenet.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.smsusenet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "SnelNL EU",
+    "ssl": {
+      "host": "ssl-news.snelnl.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.snelnl.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "SnelNL US",
+    "ssl": {
+      "host": "ssl-news2.snelnl.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news2.snelnl.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "Speedplaza",
+    "ssl": {
+      "host": "news.speedplaza.net",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.speedplaza.net",
+      "port": 119
+    }
+  },
+  {
+    "name": "Sunny Usenet",
+    "ssl": {
+      "host": "news.sunnyusenet.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.sunnyusenet.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "Tele2 v1",
+    "ssl": null,
+    "plain": {
+      "host": "tele2news.tweaknews.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Tele2 v2",
+    "ssl": null,
+    "plain": {
+      "host": "news.tele2.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Telenet",
+    "ssl": null,
+    "plain": {
+      "host": "newsgroups.telenet.be",
+      "port": 119
+    }
+  },
+  {
+    "name": "TweakDSL",
+    "ssl": null,
+    "plain": {
+      "host": "news.tweakdsl.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "TweakFiber",
+    "ssl": null,
+    "plain": {
+      "host": "news.tweak.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Tweaknews",
+    "ssl": {
+      "host": "news.tweaknews.eu",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.tweaknews.eu",
+      "port": 119
+    }
+  },
+  {
+    "name": "Usenet-News EU",
+    "ssl": {
+      "host": "news.eu.Usenet-News.net",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.eu.Usenet-News.net",
+      "port": 119
+    }
+  },
+  {
+    "name": "Usenet-News US",
+    "ssl": {
+      "host": "news.us.Usenet-News.net",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.us.Usenet-News.net",
+      "port": 119
+    }
+  },
+  {
+    "name": "Usenet.nl",
+    "ssl": {
+      "host": "news1.usenet.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "news1.usenet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Usenet.Pro",
+    "ssl": null,
+    "plain": {
+      "host": "reader.usenet.pro",
+      "port": 119
+    }
+  },
+  {
+    "name": "Usenet4u (4)",
+    "ssl": {
+      "host": "news4.usenet4u.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "news4.usenet4u.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Usenet4u (3)",
+    "ssl": {
+      "host": "news3.usenet4u.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "news3.usenet4u.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "UseNetServer",
+    "ssl": {
+      "host": "secure.Usenetserver.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.Usenetserver.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "UsenetXL",
+    "ssl": {
+      "host": "reader.usenetxl.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "reader.usenetxl.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Usenet Monster",
+    "ssl": {
+      "host": "bignews.usenetmonster.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "bignews.usenetmonster.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "VoordeligUsenet.nl",
+    "ssl": {
+      "host": "reader.voordeligusenet.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "reader.voordeligusenet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "XLNED",
+    "ssl": {
+      "host": "news.xlned.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.xlned.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "XLUsenet",
+    "ssl": {
+      "host": "ssl-news.eu.xlusenet.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.eu.xlusenet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "XMS",
+    "ssl": {
+      "host": "news.xmsnet.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.xmsnet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "XS4ALL",
+    "ssl": null,
+    "plain": {
+      "host": "news.xs4all.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "XSNews",
+    "ssl": {
+      "host": "reader.xsnews.nl",
+      "port": 443
+    },
+    "plain": {
+      "host": "reader.xsnews.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "XS Usenet",
+    "ssl": {
+      "host": "reader.xsusenet.com",
+      "port": 563
+    },
+    "plain": {
+      "host": "reader.xsusenet.com",
+      "port": 119
+    }
+  },
+  {
+    "name": "YabNews",
+    "ssl": {
+      "host": "news.yabnews.nl",
+      "port": 563
+    },
+    "plain": {
+      "host": "news.yabnews.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Zeelandnet",
+    "ssl": null,
+    "plain": {
+      "host": "news.zeelandnet.nl",
+      "port": 119
+    }
+  },
+  {
+    "name": "Ziggo",
+    "ssl": null,
+    "plain": {
+      "host": "news.ziggo.nl",
+      "port": 119
+    }
+  }
+]

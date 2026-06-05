@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{{ spot.title }} — {{ app_name }}{% endblock %}
+{% block content %}
+<a class="btn-glass" href="javascript:history.back()" style="margin-bottom:var(--ds-space-6)">← Back</a>
+<div class="detail-hero">
+  {% if spot.poster_url %}
+    <img class="detail-poster" src="{{ spot.poster_url }}" alt=""
+         onerror="this.outerHTML='<div class=\'detail-poster placeholder\'>🎬</div>'">
+  {% else %}
+    <div class="detail-poster placeholder">🎬</div>
+  {% endif %}
+  <div class="detail-body">
+    <h1>{{ spot.title }}</h1>
+    <div class="detail-facts">
+      <span class="fact"><b>Category</b> {{ spot.category | catname }}</span>
+      <span class="fact"><b>Size</b> {{ spot.size | gb }}</span>
+      <span class="fact"><b>Posted</b> {{ spot.posted_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      {% if spot.imdb_id %}<span class="fact"><b>IMDb</b> <a href="https://www.imdb.com/title/tt{{ spot.imdb_id }}/" target="_blank" rel="noopener">tt{{ spot.imdb_id }}</a></span>{% endif %}
+      <span class="fact"><b>Poster</b> {{ spot.poster }}</span>
+    </div>
+    {% if spot.description %}<p class="detail-desc">{{ spot.description }}</p>{% endif %}
+    <div style="margin-top:var(--ds-space-6); display:flex; gap:var(--ds-space-3)">
+      <a class="btn-glass btn-primary" href="/api?t=get&id={{ spot.id }}&apikey={{ '' }}">⬇ Download NZB</a>
+    </div>
+    <p style="margin-top:var(--ds-space-4); color:var(--ds-text-muted); font-size:var(--ds-text-xs)">
+      message-id: <code>{{ spot.message_id }}</code>
+    </p>
+  </div>
+</div>
+{% endblock %}

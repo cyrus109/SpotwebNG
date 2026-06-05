@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block topbar %}
+<form class="search-form" method="get" action="/">
+  <input class="search-input" type="search" name="q" value="{{ q }}" placeholder="Search spots…" autocomplete="off">
+  {% if cat %}<input type="hidden" name="cat" value="{{ cat }}">{% endif %}
+</form>
+{% endblock %}
+
+{% block content %}
+<div class="toolbar">
+  <h1>Browse</h1>
+  <span class="count">{{ total }} spot{{ '' if total == 1 else 's' }}</span>
+  <span class="spacer"></span>
+  <div class="chips">
+    <a class="chip {{ 'active' if not cat }}" href="/?q={{ q }}">All</a>
+    {% for cid, name in [(2000,'Movies'),(5000,'TV'),(3000,'Audio')] %}
+    <a class="chip {{ 'active' if cat == cid }}" href="/?q={{ q }}&cat={{ cid }}">{{ name }}</a>
+    {% endfor %}
+  </div>
+  <!-- view toggle (grid <-> table) -->
+  <button class="btn-glass btn-icon-only" id="btn-view-mode" onclick="toggleViewMode()" title="Toggle view">
+    <svg id="icon-table" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" class="hidden">
+      <rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="10" width="18" height="4" rx="1"/><rect x="3" y="16" width="18" height="4" rx="1"/>
+    </svg>
+    <svg id="icon-grid" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+      <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>
+    </svg>
+  </button>
+</div>
+
+{% if not spots %}
+  <div class="empty">No spots found. Try a different search, or run the retriever to index more.</div>
+{% else %}
+
+<!-- GRID VIEW -->
+<div id="grid-view" class="poster-grid {{ 'hidden' if view == 'table' }}">
+  {% for s in spots %}
+  <a class="poster-card" href="/spot/{{ s.id }}">
+    <span class="cat-badge">{{ s.category | catname }}</span>
+    {% if s.poster_url %}
+      <img class="poster-art" src="{{ s.poster_url }}" alt="" loading="lazy"
+           onerror="this.outerHTML='<div class=\'poster-art placeholder\'>🎬</div>'">
+    {% else %}
+      <div class="poster-art placeholder">🎬</div>
+    {% endif %}
+    <div class="poster-overlay">
+      <div class="poster-title">{{ s.title }}</div>
+      <div class="poster-meta"><span>{{ s.size | gb }}</span><span>·</span><span>{{ s.posted_at.strftime('%Y-%m-%d') }}</span></div>
+    </div>
+  </a>
+  {% endfor %}
+</div>
+
+<!-- TABLE VIEW -->
+<table id="table-view" class="spot-table {{ 'hidden' if view != 'table' }}">
+  <thead><tr><th>Title</th><th>Category</th><th>Size</th><th>Posted</th></tr></thead>
+  <tbody>
+  {% for s in spots %}
+    <tr onclick="location.href='/spot/{{ s.id }}'" style="cursor:pointer">
+      <td class="t-title">{{ s.title }}</td>
+      <td>{{ s.category | catname }}</td>
+      <td>{{ s.size | gb }}</td>
+      <td>{{ s.posted_at.strftime('%Y-%m-%d %H:%M') }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+
+{% endif %}
+{% endblock %}
+
+{% block scripts %}<script src="/static/js/browse.js"></script>{% endblock %}

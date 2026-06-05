@@ -1,0 +1,41 @@
+# SpotwebNext — standalone modern Spotnet indexer.
+# Production runs on Postgres (modern DB). Three containers:
+#   db        — Postgres
+#   api       — FastAPI: Newznab API + modern web UI + setup wizard
+#   retriever — Phase 1: sealed legacy retrieve.php scaffold that ONLY fills the DB.
+#               (Quarantined, scheduled for deletion in Phase 3 — see scaffold/README.md)
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: spotwebnext
+      POSTGRES_PASSWORD: spotwebnext
+      POSTGRES_DB: spotwebnext
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U spotwebnext"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  api:
+    build: .
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      SPOTWEBNEXT_DATABASE_URL: postgresql+asyncpg://spotwebnext:spotwebnext@db:5432/spotwebnext
+      SPOTWEBNEXT_DEFAULT_API_KEY: ${SPOTWEBNEXT_API_KEY:-changeme-spotwebnext-key}
+      SPOTWEBNEXT_SEED_DEMO_DATA: "false"
+    ports:
+      - "7979:7979"
+
+  # retriever:
+  #   build: ./scaffold       # legacy PHP fetcher — uncomment once provider creds are set
+  #   depends_on: [db]
+  #   environment:
+  #     DB_DSN: postgresql://spotwebnext:spotwebnext@db:5432/spotwebnext
+
+volumes:
+  pgdata:

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Setup — {{ app_name }}{% endblock %}
+{% block content %}
+<div class="wizard">
+  <h1>Setup</h1>
+  <p class="sub">Pick your Usenet provider — connection details autofill from the built-in catalog of {{ providers|length }} providers. You only enter your username and password.</p>
+
+  <form method="post" action="/setup">
+    <div class="field">
+      <label for="provider_select">Usenet provider</label>
+      <select id="provider_select" onchange="fillProvider()">
+        <option value="">— Custom / manual —</option>
+        {% for p in providers %}
+        <option value="{{ loop.index0 }}" {{ 'selected' if current.get('provider_name') == p.name }}>{{ p.name }}</option>
+        {% endfor %}
+      </select>
+      <input type="hidden" name="provider_name" id="provider_name" value="{{ current.get('provider_name','') }}">
+    </div>
+
+    <div class="field">
+      <label for="provider_host">Host</label>
+      <input type="text" name="provider_host" id="provider_host" value="{{ current.get('provider_host','') }}" required placeholder="reader.example.com">
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="provider_port">Port</label>
+        <input type="number" name="provider_port" id="provider_port" value="{{ current.get('provider_port','563') }}">
+      </div>
+      <div class="field">
+        <label for="provider_ssl">SSL</label>
+        <select name="provider_ssl" id="provider_ssl">
+          <option value="yes" {{ 'selected' if current.get('provider_ssl','yes') == 'yes' }}>Yes (recommended)</option>
+          <option value="no" {{ 'selected' if current.get('provider_ssl') == 'no' }}>No</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="connections">Connections</label>
+        <input type="number" name="connections" id="connections" value="{{ current.get('connections','4') }}">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" name="username" id="username" value="{{ current.get('username','') }}" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" name="password" id="password" value="{{ current.get('password','') }}" autocomplete="new-password">
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Newznab API key (give this to Radarr / Sonarr / Prowlarr)</label>
+      <div class="api-key-box">{{ default_api_key }}</div>
+    </div>
+
+    <button class="btn-glass btn-primary" type="submit" style="width:100%; padding:var(--ds-space-4)">Save &amp; continue →</button>
+  </form>
+</div>
+
+<script>
+  const PROVIDERS = {{ providers_json | safe }};
+  function fillProvider() {
+    const idx = document.getElementById('provider_select').value;
+    document.getElementById('provider_name').value = idx === '' ? '' : PROVIDERS[idx].name;
+    if (idx === '') return;
+    const p = PROVIDERS[idx];
+    const conn = p.ssl || p.plain;
+    if (!conn) return;
+    document.getElementById('provider_host').value = conn.host;
+    document.getElementById('provider_port').value = conn.port;
+    document.getElementById('provider_ssl').value = p.ssl ? 'yes' : 'no';
+  }
+</script>
+{% endblock %}

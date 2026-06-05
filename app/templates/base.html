@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="liquid-glass">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}{{ app_name }}{% endblock %}</title>
+  <link rel="stylesheet" href="/static/css/design-system.css">
+  <link rel="stylesheet" href="/static/css/spotwebng.css">
+</head>
+<body>
+  <header class="topbar">
+    <a href="/" class="brand">Spotweb<small>NG</small></a>
+    {% block topbar %}{% endblock %}
+    <span class="spacer"></span>
+    <a class="btn-glass" href="/setup" title="Setup">⚙ Setup</a>
+  </header>
+  <main class="content">
+    {% block content %}{% endblock %}
+  </main>
+  {% block scripts %}{% endblock %}
+</body>
+</html>
