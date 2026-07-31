@@ -1,41 +1,32 @@
-# SpotwebNext — standalone modern Spotnet indexer.
-# Production runs on Postgres (modern DB). Three containers:
-#   db        — Postgres
-#   api       — FastAPI: Newznab API + modern web UI + setup wizard
-#   retriever — Phase 1: sealed legacy retrieve.php scaffold that ONLY fills the DB.
-#               (Quarantined, scheduled for deletion in Phase 3 — see scaffold/README.md)
+# SpotwebNG — SQLite by default (one container, one volume). Uncomment the
+# postgres service and DATABASE_URL for a multi-user / larger install.
 services:
-  db:
-    image: postgres:16-alpine
-    environment:
-      POSTGRES_USER: spotwebnext
-      POSTGRES_PASSWORD: spotwebnext
-      POSTGRES_DB: spotwebnext
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U spotwebnext"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
-  api:
+  spotwebng:
     build: .
-    depends_on:
-      db:
-        condition: service_healthy
-    environment:
-      SPOTWEBNEXT_DATABASE_URL: postgresql+asyncpg://spotwebnext:spotwebnext@db:5432/spotwebnext
-      SPOTWEBNEXT_DEFAULT_API_KEY: ${SPOTWEBNEXT_API_KEY:-changeme-spotwebnext-key}
-      SPOTWEBNEXT_SEED_DEMO_DATA: "false"
+    image: ghcr.io/formaxlabs/spotwebng:latest
+    container_name: spotwebng
+    restart: unless-stopped
     ports:
       - "7979:7979"
+    volumes:
+      - spotwebng-data:/data
+    environment:
+      # Everything below is optional — the app generates its own API key and
+      # reads the rest from the setup wizard.
+      SPOTWEBNEXT_SEED_DEMO_DATA: "false"
+      # SPOTWEBNEXT_DATABASE_URL: postgresql+asyncpg://spotweb:secret@db/spotweb
+    # depends_on: [db]
 
-  # retriever:
-  #   build: ./scaffold       # legacy PHP fetcher — uncomment once provider creds are set
-  #   depends_on: [db]
+  # db:
+  #   image: postgres:16-alpine
+  #   restart: unless-stopped
   #   environment:
-  #     DB_DSN: postgresql://spotwebnext:spotwebnext@db:5432/spotwebnext
+  #     POSTGRES_USER: spotweb
+  #     POSTGRES_PASSWORD: secret
+  #     POSTGRES_DB: spotweb
+  #   volumes:
+  #     - spotwebng-db:/var/lib/postgresql/data
 
 volumes:
-  pgdata:
+  spotwebng-data:
+  # spotwebng-db:

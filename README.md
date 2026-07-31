@@ -37,6 +37,17 @@ uvicorn app.main:app --reload --port 7979
 # open http://localhost:7979  (first run redirects to /setup)
 ```
 
+### Docker (recommended)
+
+```bash
+docker compose up -d          # http://localhost:7979
+```
+
+One container, one volume. The database, spot covers and cached NZBs all live in `/data`,
+so they survive an image upgrade. The app generates its own Newznab API key on first boot
+(look for it in `docker compose logs`), and the setup wizard creates the administrator —
+until you complete it, the instance is open, so do it first.
+
 ### Production (Postgres, Docker)
 ```bash
 SPOTWEBNEXT_API_KEY=your-strong-key docker compose up --build
@@ -51,19 +62,31 @@ In any Newznab client (Radarr / Sonarr / Prowlarr), add a **Newznab** indexer po
 
 It serves `GET /api?t=search&q=…&apikey=…&cat=…` and works alongside your other indexers.
 
+## What works today
+
+- **Native Spotnet retrieval** — reads spot headers from `free.pt` over NNTP, parses the
+  Spotnet wire format (category/subcategory/size packed into the `From` header), and keeps
+  an incremental bookmark with article-renumber protection.
+- **Full-spot enrichment** — fetches each spot's `X-XML` payload for its description, cover
+  image and NZB segment list. Covers are served locally; **`t=get` returns a real NZB**.
+- **Spotweb-compatible filtering** — the `tree` syntax (`cat0_z0_a9`, `~cat0_z3` to exclude),
+  OR within a dimension and AND across them, with live counts on every option.
+- **Newznab API** for Radarr / Sonarr / Prowlarr, with per-client API keys.
+- **Accounts** — administrators configure the instance, viewers only browse.
+- **Retention** — keep spots listed but drop their heavy parts, or delete them outright.
+
 ## Roadmap
 
-- **Phase 1 (done):** schema, Newznab API, modern web UI, setup wizard.
-- **Phase 2:** richer browsing — comments, watchlist, advanced filters.
-- **Phase 3:** native Python Spotnet retrieval engine (NNTP + spot-signature verification),
-  replacing the legacy fetcher scaffold (see [`scaffold/README.md`](scaffold/README.md)).
+- Comments and reports groups (ratings, spam reports).
+- Saved filters and per-user watchlist / seen state.
+- Desktop clients (see `docs/` once published).
 
 ## Configuration (env, prefix `SPOTWEBNEXT_`)
 
 | Variable | Default | Notes |
 |---|---|---|
 | `DATABASE_URL` | local SQLite file | set to `postgresql+asyncpg://…` for production |
-| `DEFAULT_API_KEY` | `changeme-spotwebnext-key` | the Newznab key clients authenticate with |
+| `DEFAULT_API_KEY` | a key generated on first boot (see the logs, or Settings → API access) | the Newznab key clients authenticate with |
 | `SEED_DEMO_DATA` | `true` | seed demo spots on first boot; set `false` in production |
 
 ## License
