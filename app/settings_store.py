@@ -1,0 +1,107 @@
+"""Typed application settings, stored as key/value rows in `settings`.
+
+The setup wizard writes provider credentials into the same table; this module
+owns the rest — retention, display, and behaviour — with defaults, coercion and
+clamping so a bad value in the database can never break a page render.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .models import Setting
+
+# key -> (default, kind). kind drives coercion and form handling.
+SPEC: dict[str, tuple[Any, str]] = {
+    # retrieval
+    "retrieve_interval": (15, "int"),  # minutes between automatic runs
+    "retrieve_backfill": (20000, "int"),  # articles to scan on a first run
+    "auto_enrich": (True, "bool"),  # fetch images/NZB refs in the background
+    # retention
+    "retention_days": (0, "int"),  # 0 = keep forever
+    "retention_type": ("fullonly", "str"),  # fullonly | everything
+    # display
+    "per_page": (120, "int"),
+    "default_sort": ("new", "str"),
+    "default_view": ("grid", "str"),
+    "hide_adult": (False, "bool"),
+    "site_name": ("SpotwebNG", "str"),
+    "theme": ("liquid-glass", "str"),
+}
+
+DEFAULTS: dict[str, Any] = {key: default for key, (default, _) in SPEC.items()}
+
+CLAMPS = {
+    "per_page": (12, 500),
+    "retrieve_interval": (5, 1440),
+    "retrieve_backfill": (1000, 500_000),
+    "retention_days": (0, 3650),
+}
+
+CHOICES = {
+    "retention_type": ("fullonly", "everything"),
+    "default_sort": ("new", "old", "size", "title"),
+    "default_view": ("grid", "table"),
+    "theme": ("liquid-glass", "midnight"),
+}
+
+
+def _coerce(key: str, raw: str) -> Any:
+    default, kind = SPEC[key]
+    if kind == "int":
+        try:
+            value = int(str(raw).strip())
+        except (TypeError, ValueError):
+            return default
+        bounds = CLAMPS.get(key)
+        if bounds is not None:
+            low, high = bounds
+            value = max(low, min(high, value))
+        return value
+    if kind == "bool":
+        return str(raw).strip().lower() in ("1", "true", "on", "yes")
+    text = str(raw).strip()
+    allowed = CHOICES.get(key)
+    if allowed and text not in allowed:
+        return default
+    return text or default
+
+
+async def load_settings(session: AsyncSession) -> dict[str, Any]:
+    """All known settings, with defaults filled in and values coerced."""
+    stored = {s.key: s.value for s in (await session.execute(select(Setting))).scalars().all()}
+    return {
+        key: _coerce(key, stored[key]) if key in stored else default
+        for key, default in DEFAULTS.items()
+    }
+
+
+async def get_setting(session: AsyncSession, key: str) -> Any:
+    return (await load_settings(session)).get(key)
+
+
+async def save_settings(session: AsyncSession, values: dict[str, str]) -> dict[str, Any]:
+    """Persist the known keys from a form submission; unknown keys are ignored.
+
+    Booleans absent from the payload are only cleared when the caller includes
+    the matching `<key>__present` marker, so partial forms stay safe.
+    """
+    for key, (_default, kind) in SPEC.items():
+        present = key in values
+        if kind == "bool" and f"{key}__present" in values:
+            raw = "on" if present else ""
+        elif present:
+            raw = values[key]
+        else:
+            continue
+        existing = await session.get(Setting, key)
+        text = str(_coerce(key, raw))
+        if existing:
+            existing.value = text
+        else:
+            session.add(Setting(key=key, value=text))
+    await session.commit()
+    return await load_settings(session)
