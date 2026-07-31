@@ -5,9 +5,11 @@ SpotwebNG is a standalone app. It talks to the outside world over HTTP only
 the app boots instantly for development; point DATABASE_URL at Postgres for
 production.
 """
+
 from __future__ import annotations
 
 import json
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -15,6 +17,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
+# Runtime artifacts (spot images, assembled NZBs) — outside the source tree, and
+# relocatable so a container can point them at a mounted volume.
+SPOT_DATA_DIR = Path(os.environ.get("SPOTWEBNG_DATA") or BASE_DIR.parent / "spot_data")
+IMAGES_DIR = SPOT_DATA_DIR / "images"
+NZB_DIR = SPOT_DATA_DIR / "nzbs"
 
 
 class Settings(BaseSettings):
@@ -28,7 +35,7 @@ class Settings(BaseSettings):
     seed_demo_data: bool = True
 
     # Default API key handed to the first user; overridable via env in production.
-    default_api_key: str = "changeme-spotwebnext-key"
+    default_api_key: str = ""  # generated on first boot; never ship a known key
 
 
 @lru_cache

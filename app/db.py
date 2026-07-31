@@ -3,10 +3,12 @@
 Production target is Postgres (asyncpg); a local SQLite file is the zero-config
 dev fallback. Same engine abstraction either way.
 """
+
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
 
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .config import get_settings
@@ -26,3 +28,16 @@ async def init_db() -> None:
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with SessionLocal() as session:
         yield session
+
+
+# SQLite defaults (rollback journal, 5s busy timeout) make a writer block every
+# reader — with two background loops that surfaces as "database is locked".
+if engine.url.get_backend_name() == "sqlite":
+
+    @event.listens_for(engine.sync_engine, "connect")
+    def _sqlite_pragmas(dbapi_connection, _record):  # pragma: no cover - driver hook
+        cur = dbapi_connection.cursor()
+        cur.execute("PRAGMA journal_mode=WAL")
+        cur.execute("PRAGMA synchronous=NORMAL")
+        cur.execute("PRAGMA busy_timeout=30000")
+        cur.close()

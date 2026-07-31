@@ -4,6 +4,7 @@ Mirrors the essentials of a Spotnet "spot" (a signed Usenet post describing
 content) plus the config the engine and API need. Deliberately small for
 Phase 1; the legacy Spotweb schema had ~40 columns of cruft we don't carry.
 """
+
 from __future__ import annotations
 
 from datetime import datetime
@@ -29,6 +30,15 @@ class Spot(Base):
     category: Mapped[int] = mapped_column(Integer, index=True, default=0)
     size: Mapped[int] = mapped_column(BigInteger, default=0)
     posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    # Spotnet sub-categories, pipe-terminated like Spotweb ('a9|a11|'), so a
+    # LIKE '%a9|%' matches exactly one code. Meaning depends on the head
+    # category: cat0 a=Format b=Source c=Language d=Genre z=Type.
+    subcat_a: Mapped[str] = mapped_column(String(64), default="")
+    subcat_b: Mapped[str] = mapped_column(String(64), default="")
+    subcat_c: Mapped[str] = mapped_column(String(64), default="")
+    subcat_d: Mapped[str] = mapped_column(String(128), default="")
+    subcat_z: Mapped[str] = mapped_column(String(32), default="")
+    spot_category: Mapped[int] = mapped_column(Integer, default=-1, index=True)
     # Optional rich metadata harvested from the spot body / lookups.
     imdb_id: Mapped[str] = mapped_column(String(16), default="", index=True)
     tvmaze_id: Mapped[str] = mapped_column(String(16), default="")
@@ -36,6 +46,11 @@ class Spot(Base):
     description: Mapped[str] = mapped_column(Text, default="")
     # NZB reference: the message-id of the NZB segment to fetch from Usenet.
     nzb_ref: Mapped[str] = mapped_column(String(255), default="")
+    # Full-spot (X-XML) enrichment: 0 = pending, 1 = done, 2 = failed.
+    enriched: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    website: Mapped[str] = mapped_column(String(1024), default="")
+    # JSON list of NZB segment message-ids from the full-spot XML.
+    nzb_segments: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -47,7 +62,48 @@ class ApiUser(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(128), default="default")
     api_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
+    # Stamped on each authenticated API call so a key can be safely retired.
+    last_used: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class User(Base):
+    """A person who can sign in. `admin` configures; `viewer` only browses."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # Stored lowercased: usernames are matched case-insensitively.
+    username: Mapped[str] = mapped_column(String(64), unique=True, index=True)
+    display_name: Mapped[str] = mapped_column(String(64), default="")
+    password_hash: Mapped[str] = mapped_column(String(255))
+    role: Mapped[str] = mapped_column(String(16), default="viewer", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_login: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Session(Base):
+    """A logged-in browser session (opaque token in the sw_session cookie)."""
+
+    __tablename__ = "sessions"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+
+
+class UsenetState(Base):
+    """Incremental retrieval bookmark per stream (mirrors Spotweb's usenetstate)."""
+
+    __tablename__ = "usenet_state"
+
+    infotype: Mapped[str] = mapped_column(String(32), primary_key=True)  # 'spots'
+    cur_article: Mapped[int] = mapped_column(BigInteger, default=0)
+    cur_message_id: Mapped[str] = mapped_column(String(255), default="")
+    last_retrieved: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class Setting(Base):

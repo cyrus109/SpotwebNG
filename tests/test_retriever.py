@@ -1,0 +1,387 @@
+"""Integration tests for the NNTP spot retriever against a fake news server."""
+
+import asyncio
+import json
+import zlib
+from datetime import UTC
+
+import pytest
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from app.models import Base, Setting, Spot, UsenetState
+from app.retriever import retrieve_spots
+from tests.test_spotnet import SAMPLE_XML
+
+GOOD_USER, GOOD_PASS = "alice", "s3cret"
+
+SPOT_FROM = "Nick{n} <k@14a09b03c02d05.73400320{n}.r.20260101.n.n.SIG>"
+
+
+def _xover_line(n: int) -> str:
+    return "\t".join(
+        [
+            str(n),
+            f"Spot Title {n} | grp",
+            SPOT_FROM.format(n=n),
+            "Fri, 24 Jul 2026 10:00:00 +0200",
+            f"<spot-{n}@spot.example>",
+            "",
+            "1000",
+            "10",
+        ]
+    )
+
+
+class FakeNewsServer:
+    """Speaks just enough NNTP: auth, GROUP, XOVER, XHDR Message-ID."""
+
+    def __init__(self, first: int = 100, articles: dict[int, str] | None = None):
+        self.first = first
+        self.articles = articles if articles is not None else {}
+        self.server = None
+        self.port = None
+
+    @property
+    def last(self) -> int:
+        return max(self.articles, default=self.first)
+
+    async def start(self):
+        self.server = await asyncio.start_server(self._handle, "127.0.0.1", 0)
+        self.port = self.server.sockets[0].getsockname()[1]
+
+    async def stop(self):
+        self.server.close()
+        await self.server.wait_closed()
+
+    async def _handle(self, reader, writer):
+        writer.write(b"200 fake ready\r\n")
+        await writer.drain()
+        while True:
+            line = await reader.readline()
+            if not line:
+                break
+            cmd = line.decode().strip()
+            upper = cmd.upper()
+            if upper.startswith("AUTHINFO USER"):
+                writer.write(b"381 pw\r\n")
+            elif upper.startswith("AUTHINFO PASS"):
+                writer.write(b"281 ok\r\n")
+            elif upper.startswith("GROUP"):
+                writer.write(
+                    f"211 {len(self.articles)} {self.first} {self.last} free.pt\r\n".encode()
+                )
+            elif upper.startswith("XOVER"):
+                lo, _, hi = cmd.split(" ")[1].partition("-")
+                lo, hi = int(lo), int(hi or lo)
+                writer.write(b"224 overview\r\n")
+                for n in sorted(self.articles):
+                    if lo <= n <= hi:
+                        writer.write(self.articles[n].encode() + b"\r\n")
+                writer.write(b".\r\n")
+            elif upper.startswith("XHDR MESSAGE-ID"):
+                n = int(cmd.split(" ")[2])
+                writer.write(b"221 header\r\n")
+                if n in self.articles:
+                    msgid = self.articles[n].split("\t")[4]
+                    writer.write(f"{n} {msgid}\r\n".encode())
+                writer.write(b".\r\n")
+            elif upper.startswith("QUIT"):
+                writer.write(b"205 bye\r\n")
+                await writer.drain()
+                break
+            else:
+                writer.write(b"500 what\r\n")
+            await writer.drain()
+        writer.close()
+
+
+@pytest.fixture
+async def db():
+    engine = create_async_engine("sqlite+aiosqlite://")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    yield factory
+    await engine.dispose()
+
+
+async def _configure(factory, port: int):
+    async with factory() as session:
+        for key, value in {
+            "provider_host": "127.0.0.1",
+            "provider_port": str(port),
+            "provider_ssl": "no",
+            "username": GOOD_USER,
+            "password": GOOD_PASS,
+        }.items():
+            session.add(Setting(key=key, value=value))
+        await session.commit()
+
+
+async def test_first_run_fetches_and_stores_spots(db):
+    server = FakeNewsServer(
+        first=100,
+        articles={
+            100: _xover_line(100),
+            101: _xover_line(101),
+            # a non-spot usenet post in the group — must be skipped
+            102: "102\tregular post\tsomeone@example.com\tFri, 24 Jul 2026 10:00:00 +0200\t<x@y>\t\t5\t1",
+            103: _xover_line(103),
+        },
+    )
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            result = await retrieve_spots(session)
+        assert result["added"] == 3
+        async with db() as session:
+            count = (await session.execute(select(func.count()).select_from(Spot))).scalar_one()
+            assert count == 3
+            spot = (
+                await session.execute(
+                    select(Spot).where(Spot.message_id == "<spot-100@spot.example>")
+                )
+            ).scalar_one()
+            assert spot.title == "Spot Title 100"
+            assert spot.category == 2040
+            state = await session.get(UsenetState, "spots")
+            assert state.cur_article == 103
+            assert state.cur_message_id == "<spot-103@spot.example>"
+    finally:
+        await server.stop()
+
+
+async def test_second_run_only_adds_new(db):
+    articles = {100: _xover_line(100), 101: _xover_line(101)}
+    server = FakeNewsServer(first=100, articles=articles)
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            first = await retrieve_spots(session)
+        assert first["added"] == 2
+
+        # nothing new yet
+        async with db() as session:
+            again = await retrieve_spots(session)
+        assert again["added"] == 0
+
+        # one new spot arrives
+        articles[102] = _xover_line(102)
+        async with db() as session:
+            third = await retrieve_spots(session)
+        assert third["added"] == 1
+        async with db() as session:
+            count = (await session.execute(select(func.count()).select_from(Spot))).scalar_one()
+        assert count == 3
+    finally:
+        await server.stop()
+
+
+async def test_unconfigured_provider_raises(db):
+    async with db() as session:
+        with pytest.raises(ValueError):
+            await retrieve_spots(session)
+
+
+# ---------- full-spot enrichment ----------
+
+
+def _escape(data: bytes) -> bytes:
+    return (
+        data.replace(b"=", b"=D")
+        .replace(b"\x00", b"=A")
+        .replace(b"\r", b"=B")
+        .replace(b"\n", b"=C")
+    )
+
+
+NZB_XML = b'<?xml version="1.0"?><nzb><file subject="x"><segments/></file></nzb>'
+IMAGE_BYTES = b"\xff\xd8\xff\xe0FAKEJPEGDATA\x00\r\n="
+
+
+class EnrichableServer(FakeNewsServer):
+    """Adds HEAD (X-XML headers) and BODY (binary segments) to the fake server."""
+
+    def __init__(self, **kw):
+        super().__init__(**kw)
+        chunks = [SAMPLE_XML[i : i + 80] for i in range(0, len(SAMPLE_XML), 80)]
+        self.heads = {
+            "<full-1@spot.example>": [f"X-XML: {c}" for c in chunks],
+        }
+        deflated = zlib.compress(NZB_XML)[2:-4]
+        self.bodies = {
+            "<nzb-part1@spot.net>": _escape(deflated[: len(deflated) // 2]),
+            "<nzb-part2@spot.net>": _escape(deflated[len(deflated) // 2 :]),
+            "<img-part1@spot.net>": _escape(IMAGE_BYTES),
+        }
+
+    async def _handle(self, reader, writer):
+        writer.write(b"200 fake ready\r\n")
+        await writer.drain()
+        while True:
+            line = await reader.readline()
+            if not line:
+                break
+            cmd = line.decode().strip()
+            upper = cmd.upper()
+            if upper.startswith("HEAD"):
+                msgid = cmd.split(" ", 1)[1]
+                if msgid in self.heads:
+                    writer.write(b"221 0 head\r\n")
+                    for h in self.heads[msgid]:
+                        writer.write(h.encode() + b"\r\n")
+                    writer.write(b".\r\n")
+                else:
+                    writer.write(b"430 no such article\r\n")
+            elif upper.startswith("BODY"):
+                msgid = cmd.split(" ", 1)[1]
+                if msgid in self.bodies:
+                    writer.write(b"222 0 body\r\n")
+                    data = self.bodies[msgid]
+                    for i in range(0, len(data), 60):
+                        writer.write(data[i : i + 60] + b"\r\n")
+                    writer.write(b".\r\n")
+                else:
+                    writer.write(b"430 no such article\r\n")
+            elif upper.startswith("AUTHINFO USER"):
+                writer.write(b"381 pw\r\n")
+            elif upper.startswith("AUTHINFO PASS"):
+                writer.write(b"281 ok\r\n")
+            elif upper.startswith("QUIT"):
+                writer.write(b"205 bye\r\n")
+                await writer.drain()
+                break
+            else:
+                writer.write(b"500 what\r\n")
+            await writer.drain()
+        writer.close()
+
+
+async def test_enrich_fills_description_image_and_nzb(db, tmp_path):
+    from datetime import datetime
+
+    from app.retriever import enrich_new_spots
+
+    server = EnrichableServer()
+    await server.start()
+    await _configure(db, server.port)
+    async with db() as session:
+        session.add(
+            Spot(
+                message_id="<full-1@spot.example>",
+                title="Great Movie 2026",
+                posted_at=datetime(2026, 7, 25, tzinfo=UTC),
+                category=2040,
+            )
+        )
+        await session.commit()
+    try:
+        async with db() as session:
+            result = await enrich_new_spots(session, images_dir=tmp_path, limit=10)
+        assert result["enriched"] == 1
+        async with db() as session:
+            spot = (
+                await session.execute(
+                    select(Spot).where(Spot.message_id == "<full-1@spot.example>")
+                )
+            ).scalar_one()
+            assert "very nice release" in spot.description
+            assert spot.website == "https://example.com/info"
+            assert json.loads(spot.nzb_segments) == [
+                "nzb-part1@spot.net",
+                "nzb-part2@spot.net",
+            ]
+            assert spot.enriched == 1
+            assert spot.poster_url == f"/image/{spot.id}"
+            assert (tmp_path / f"{spot.id}.jpg").read_bytes() == IMAGE_BYTES
+        # second run: nothing left to enrich
+        async with db() as session:
+            again = await enrich_new_spots(session, images_dir=tmp_path, limit=10)
+        assert again["enriched"] == 0
+    finally:
+        await server.stop()
+
+
+async def test_fetch_nzb_reassembles_and_inflates(db, tmp_path):
+    from app.retriever import NntpClient, fetch_binary
+
+    server = EnrichableServer()
+    await server.start()
+    try:
+        client = NntpClient()
+        await client.connect("127.0.0.1", server.port, False, GOOD_USER, GOOD_PASS)
+        nzb = await fetch_binary(
+            client, ["nzb-part1@spot.net", "nzb-part2@spot.net"], compressed=True
+        )
+        assert nzb == NZB_XML
+        await client.quit()
+    finally:
+        await server.stop()
+
+
+async def test_subcats_are_stored_for_filtering(db):
+    """Sub-dimensions (format/source/language/genre/type) must survive into the DB."""
+    server = FakeNewsServer(first=100, articles={100: _xover_line(100)})
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            await retrieve_spots(session)
+        async with db() as session:
+            spot = (
+                await session.execute(
+                    select(Spot).where(Spot.message_id == "<spot-100@spot.example>")
+                )
+            ).scalar_one()
+            # From header carries a09 (x264) b03 (Retail) c02 (NL builtin) d05
+            assert spot.subcat_a == "a9|"
+            assert spot.subcat_b == "b3|"
+            assert spot.subcat_c == "c2|"
+            assert spot.subcat_d == "d5|"
+            assert spot.subcat_z == "z0|"  # derived: no TV/book/erotica markers → movie
+    finally:
+        await server.stop()
+
+
+async def test_rescan_backfills_subcats_without_touching_enrichment(db):
+    """Re-scanning must fill missing subcats on existing rows, keeping images."""
+    from datetime import datetime
+
+    server = FakeNewsServer(first=100, articles={100: _xover_line(100)})
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        # simulate a row stored by the previous schema: no subcats, already enriched
+        async with db() as session:
+            session.add(
+                Spot(
+                    message_id="<spot-100@spot.example>",
+                    title="Spot Title 100",
+                    posted_at=datetime(2026, 7, 24, tzinfo=UTC),
+                    category=2040,
+                    enriched=1,
+                    poster_url="/image/1",
+                )
+            )
+            await session.commit()
+
+        async with db() as session:
+            result = await retrieve_spots(session)
+        assert result["added"] == 0
+        assert result["backfilled"] == 1
+
+        async with db() as session:
+            spot = (
+                await session.execute(
+                    select(Spot).where(Spot.message_id == "<spot-100@spot.example>")
+                )
+            ).scalar_one()
+            assert spot.subcat_a == "a9|"
+            assert spot.subcat_z == "z0|"
+            assert spot.enriched == 1  # enrichment preserved
+            assert spot.poster_url == "/image/1"
+    finally:
+        await server.stop()
