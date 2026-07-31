@@ -2,21 +2,32 @@
 {% block topbar %}
 <form class="search-form" method="get" action="/">
   <input class="search-input" type="search" name="q" value="{{ q }}" placeholder="Search spots…" autocomplete="off">
-  {% if cat %}<input type="hidden" name="cat" value="{{ cat }}">{% endif %}
+  {% if tree %}<input type="hidden" name="tree" value="{{ tree }}">{% endif %}
 </form>
 {% endblock %}
 
+{% block rail %}{% include "partials/sidebar.html" %}{% endblock %}
+{% block drawer %}{% include "partials/filter_drawer.html" %}{% endblock %}
+
 {% block content %}
 <div class="toolbar">
-  <h1>Browse</h1>
-  <span class="count">{{ total }} spot{{ '' if total == 1 else 's' }}</span>
+  <h1>{{ section_label }}</h1>
+  <span class="count">{{ '{:,}'.format(total) }} spot{{ '' if total == 1 else 's' }}</span>
   <span class="spacer"></span>
-  <div class="chips">
-    <a class="chip {{ 'active' if not cat }}" href="/?q={{ q }}">All</a>
-    {% for cid, name in [(2000,'Movies'),(5000,'TV'),(3000,'Audio')] %}
-    <a class="chip {{ 'active' if cat == cid }}" href="/?q={{ q }}&cat={{ cid }}">{{ name }}</a>
-    {% endfor %}
-  </div>
+  <form class="toolbar-selects" method="get" action="/">
+    <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="tree" value="{{ tree }}">
+    <select name="age" data-ui-select onchange="this.form.submit()" title="Age">
+      {% for val, label in [('','Any time'),('24h','Last 24 hours'),('3d','Last 3 days'),('1w','Last week'),('1m','Last month')] %}
+      <option value="{{ val }}" {{ 'selected' if age == val }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+    <select name="sort" data-ui-select onchange="this.form.submit()" title="Sort">
+      {% for val, label in [('new','Newest'),('old','Oldest'),('size','Largest'),('title','Title A-Z')] %}
+      <option value="{{ val }}" {{ 'selected' if sort == val }}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </form>
+  <button class="btn-glass" id="btn-refresh" onclick="refreshSpots()" title="Fetch new spots from Usenet">⟳ Refresh</button>
   <!-- view toggle (grid <-> table) -->
   <button class="btn-glass btn-icon-only" id="btn-view-mode" onclick="toggleViewMode()" title="Toggle view">
     <svg id="icon-table" viewBox="0 0 24 24" width="20" height="20" fill="currentColor" class="hidden">
@@ -38,10 +49,13 @@
   <a class="poster-card" href="/spot/{{ s.id }}">
     <span class="cat-badge">{{ s.category | catname }}</span>
     {% if s.poster_url %}
-      <img class="poster-art" src="{{ s.poster_url }}" alt="" loading="lazy"
-           onerror="this.outerHTML='<div class=\'poster-art placeholder\'>🎬</div>'">
+      <div class="poster-shot">
+        <img class="poster-blur" src="{{ s.poster_url }}" alt="" aria-hidden="true" loading="lazy">
+        <img class="poster-art" src="{{ s.poster_url }}" alt="" loading="lazy"
+             onerror="this.closest('.poster-shot').outerHTML='<div class=\'poster-shot placeholder\'>🎬</div>'">
+      </div>
     {% else %}
-      <div class="poster-art placeholder">🎬</div>
+      <div class="poster-shot placeholder">🎬</div>
     {% endif %}
     <div class="poster-overlay">
       <div class="poster-title">{{ s.title }}</div>
@@ -67,6 +81,19 @@
 </table>
 
 {% endif %}
+
+{% if pages > 1 %}
+<nav class="pager" aria-label="Pages">
+  {% set qs = 'q=' ~ q ~ '&tree=' ~ tree ~ '&sort=' ~ sort ~ '&age=' ~ age %}
+  {% if page > 1 %}<a class="btn-glass" href="/?{{ qs }}&page={{ page - 1 }}">← Previous</a>{% endif %}
+  <span class="pager-info">Page {{ page }} of {{ '{:,}'.format(pages) }}</span>
+  {% if page < pages %}<a class="btn-glass" href="/?{{ qs }}&page={{ page + 1 }}">Next →</a>{% endif %}
+</nav>
+{% endif %}
+
 {% endblock %}
 
-{% block scripts %}<script src="/static/js/browse.js"></script>{% endblock %}
+{% block scripts %}
+<script src="/static/js/browse.js?v={{ asset_v('js/browse.js') }}"></script>
+<script src="/static/js/filters.js?v={{ asset_v('js/filters.js') }}"></script>
+{% endblock %}

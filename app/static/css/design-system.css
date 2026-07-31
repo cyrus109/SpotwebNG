@@ -149,3 +149,51 @@
 }
 
 /* Design system uses consolidated glass theme - no variant switching needed */
+
+/* ===== CONTROL SIZING =====
+   One height for every interactive control so toolbars line up exactly. */
+:root {
+  --ds-control-height: 40px;
+  --ds-control-radius: var(--ds-radius-md);
+}
+
+/* ===== FONTS (self-hosted — no external requests from a LAN install) ===== */
+@font-face {
+  font-family: 'Instrument Sans';
+  src: url('/static/fonts/InstrumentSans.woff2') format('woff2');
+  font-weight: 400 700; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('/static/fonts/JetBrainsMono.woff2') format('woff2');
+  font-weight: 400 500; font-style: normal; font-display: swap;
+}
+
+/* ===== THEME 2: STUDIO =====
+   From the Spotweb Settings design. Colour tokens + typefaces only —
+   spacing, type scale and radii stay shared with the default theme. */
+[data-theme="midnight"] {
+  --ds-bg-base: #07080C;
+  --ds-bg-surface: #0B0E15;
+  --ds-bg-elevated: #0F1420;
+  --ds-bg-overlay: rgba(0, 0, 0, 0.86);
+
+  --ds-text-primary: #F2F4F8;
+  --ds-text-secondary: #98A1B4;
+  --ds-text-muted: #5B6377;
+
+  --ds-accent-primary: #6E56F8;
+  --ds-accent-secondary: #8B7BFF;
+  --ds-accent-tertiary: #34d399;
+
+  --ds-border-subtle: #1B2130;
+  --ds-border-default: #1E2534;
+  --ds-border-strong: #2A3348;
+
+  --ds-glass-bg: #141926;
+  --ds-glass-border: #1E2534;
+  --ds-shadow-glow: 0 0 24px rgba(110, 86, 248, 0.30);
+
+  --ds-font-sans: 'Instrument Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --ds-font-mono: 'JetBrains Mono', 'SF Mono', Monaco, monospace;
+}

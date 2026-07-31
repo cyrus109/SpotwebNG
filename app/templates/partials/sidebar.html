@@ -1,0 +1,69 @@
+{# Left rail: browse sections with live counts, then the sub-dimensions of
+   whatever section is being browsed. Mirrors the Cinelynx nav pattern. #}
+<nav class="rail" id="rail" aria-label="Browse">
+  <div class="rail-scroll">
+    <div class="rail-sec">
+      <div class="rail-title">Browse</div>
+      <div class="rail-nav">
+        {% for s in sections %}
+        <a href="/?q={{ q }}&tree={{ s.tree }}&sort={{ sort }}&age={{ age }}"
+           class="rail-link {{ 'on' if s.key == current_section }}">
+          <span class="rail-icon">{{ icons[s.key] | safe }}</span>
+          <span class="rail-text">{{ s.label }}</span>
+          <span class="rail-n">{{ '{:,}'.format(counts.get(s.key or 'all', 0)) }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </div>
+
+    {% if not dimensions and groups %}
+    <div class="rail-sec">
+      <div class="rail-title">Refine</div>
+      <div class="rail-nav">
+        <button type="button" class="rail-dim" data-open-drawer>
+          <span class="rail-text">Filters by category</span>
+          <span class="rail-n">{{ groups | length }}</span>
+        </button>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if dimensions %}
+    <div class="rail-sec">
+      <div class="rail-title">Refine {{ section_label }}</div>
+      <div class="rail-nav">
+        {% for d in dimensions %}
+        <button type="button" class="rail-dim" data-open-drawer data-dim="{{ d.letter }}">
+          <span class="rail-text">{{ d.label }}</span>
+          {% if d.chosen %}<span class="rail-pill">{{ d.chosen }}</span>
+          {% else %}<span class="rail-n">{{ d.options | length }}</span>{% endif %}
+        </button>
+        {% endfor %}
+      </div>
+      {% set active = [] %}
+      {% for d in dimensions %}{% for o in d.options %}{% if o.state %}{% set _ = active.append((d, o)) %}{% endif %}{% endfor %}{% endfor %}
+      {% if active %}
+      <div class="rail-chips">
+        {% for d, o in active %}
+        <a class="rail-chip {{ 'neg' if o.state == 'exc' }}"
+           href="/?q={{ q }}&tree={{ o.tree }}&sort={{ sort }}&age={{ age }}"
+           title="Remove {{ d.label }}: {{ o.name }}">
+          {% if o.state == 'exc' %}&minus;{% endif %}{{ o.name }} <span aria-hidden="true">✕</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="rail-foot">
+    <button type="button" class="btn-glass" data-open-drawer>
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+           stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 5h18l-7 8v6l-4 2v-8Z"/>
+      </svg>
+      Advanced filters
+    </button>
+  </div>
+</nav>

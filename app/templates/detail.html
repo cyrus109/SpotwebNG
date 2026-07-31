@@ -15,12 +15,14 @@
       <span class="fact"><b>Category</b> {{ spot.category | catname }}</span>
       <span class="fact"><b>Size</b> {{ spot.size | gb }}</span>
       <span class="fact"><b>Posted</b> {{ spot.posted_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      {% if spot.nzb_segments %}<span class="fact ok"><b>NZB</b> available</span>{% endif %}
       {% if spot.imdb_id %}<span class="fact"><b>IMDb</b> <a href="https://www.imdb.com/title/tt{{ spot.imdb_id }}/" target="_blank" rel="noopener">tt{{ spot.imdb_id }}</a></span>{% endif %}
       <span class="fact"><b>Poster</b> {{ spot.poster }}</span>
     </div>
-    {% if spot.description %}<p class="detail-desc">{{ spot.description }}</p>{% endif %}
-    <div style="margin-top:var(--ds-space-6); display:flex; gap:var(--ds-space-3)">
-      <a class="btn-glass btn-primary" href="/api?t=get&id={{ spot.id }}&apikey={{ '' }}">⬇ Download NZB</a>
+    {% if spot.description %}<div class="detail-desc">{{ spot.description }}</div>{% endif %}
+    <div class="detail-actions">
+      <a class="btn-glass btn-primary" href="/api?t=get&id={{ spot.id }}&apikey={{ api_key }}">⬇ Download NZB</a>
+      {% if spot.website %}<a class="btn-glass" href="{{ spot.website }}" target="_blank" rel="noopener noreferrer">🔗 More info</a>{% endif %}
     </div>
     <p style="margin-top:var(--ds-space-4); color:var(--ds-text-muted); font-size:var(--ds-text-xs)">
       message-id: <code>{{ spot.message_id }}</code>

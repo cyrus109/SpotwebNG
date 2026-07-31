@@ -42,3 +42,27 @@
     if (saved) apply(saved);
   });
 })();
+
+// Manual spot retrieval from the toolbar.
+window.refreshSpots = async function () {
+  const btn = document.getElementById("btn-refresh");
+  const original = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "⟳ Fetching…";
+  try {
+    const resp = await fetch("/retrieve", { method: "POST" });
+    const r = await resp.json();
+    if (r.ok) {
+      btn.textContent = "✓ +" + r.added + " new";
+      setTimeout(() => location.reload(), 900);
+    } else {
+      btn.textContent = original;
+      btn.disabled = false;
+      alert(r.message);
+    }
+  } catch (err) {
+    btn.textContent = original;
+    btn.disabled = false;
+    alert("Refresh failed: " + err);
+  }
+};
