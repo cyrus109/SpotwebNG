@@ -22,3 +22,10 @@ backups_*.db
 
 # Local design references (not part of the source)
 design/
+
+# Test/coverage artifacts
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
