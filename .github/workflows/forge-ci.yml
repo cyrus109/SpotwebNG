@@ -1,0 +1,75 @@
+# FORGE v4 CI pipeline (GitHub Actions form; translate to GitLab if needed).
+# All jobs MUST be green before merge. Enable branch protection on main:
+# PR required, no force-push.
+#
+# A `detect` job checks whether the repo has a Python project yet; the real jobs
+# run only if it does. A freshly bootstrapped repo (no pyproject.toml) gets a
+# GREEN detect job and skipped work jobs — neutral CI, no failure-email spam.
+# CI activates automatically once pyproject.toml lands.
+name: forge-ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      has_project: ${{ steps.check.outputs.has_project }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: check
+        run: |
+          if [ -f pyproject.toml ]; then
+            echo "has_project=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_project=false" >> "$GITHUB_OUTPUT"
+            echo "No pyproject.toml yet — FORGE CI is dormant until code lands."
+          fi
+
+  lint:
+    needs: detect
+    if: needs.detect.outputs.has_project == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run ruff check .
+      - run: uv run ruff format --check .
+      - run: uv run mypy --strict .
+
+  test:
+    needs: detect
+    if: needs.detect.outputs.has_project == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      # Coverage threshold 80%; fail below.
+      - run: uv run pytest --cov --cov-fail-under=80
+
+  security:
+    needs: detect
+    if: needs.detect.outputs.has_project == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run pip-audit
+      - uses: gitleaks/gitleaks-action@v2
+
+  sbom:
+    # NIST SSDF PS/PW: generate CycloneDX SBOM and keep as artifact.
+    needs: detect
+    if: needs.detect.outputs.has_project == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv run cyclonedx-py environment -o sbom.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.json

@@ -1,0 +1,19 @@
+# FORGE gitleaks config — copy to your project root as .gitleaks.toml
+# Extends the default ruleset; the [allowlist] records ACCEPTED, intentional
+# secrets so the gate stays trustworthy instead of training you to --no-verify.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Accepted, intentional, low-risk keys (document every entry)"
+# Example: a public TMDB read key that is DESIGNED to ship in the client and is
+# loaded from env, not hardcoded. Add real accepted values or regexes here.
+# NOTE: prefer env/secret-manager over an allowlist entry — only allowlist keys
+# that are genuinely public/client-side by design.
+regexes = [
+  # '''TMDB_API_KEY''',           # the env var NAME is fine to appear in code
+]
+paths = [
+  '''.*\.example\.(json|ya?ml|env)$''',  # example/config templates
+  '''.*/tests?/.*fixture.*''',           # test fixtures with fake tokens
+]

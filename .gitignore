@@ -6,3 +6,19 @@ __pycache__/
 venv/
 .DS_Store
 pgdata/
+.forge/
+# ...but accepted exceptions are governance, not runtime state.
+!.forge/waivers.md
+traces/runs/
+audits/
+
+# Runtime artifacts — fetched spot covers and cached NZBs (multi-GB, never commit)
+spot_data/
+backups_*.db
+
+# SQLite WAL sidecars (*.db alone does not cover these)
+*.db-wal
+*.db-shm
+
+# Local design references (not part of the source)
+design/
