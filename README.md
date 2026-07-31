@@ -1,94 +1,142 @@
-# SpotwebNG — a modern Spotweb
+<div align="center">
 
-**SpotwebNG** is a modern, self-hosted **Spotweb** alternative — a clean reimagining of the
-classic [Spotweb](https://github.com/spotweb/spotweb) Spotnet/Usenet community indexer, rebuilt
-in Python/FastAPI with a fast Netflix-style web UI and a **Newznab-compatible API**.
+# SpotwebNG
 
-If you're looking for a faster, better-looking, actively modern replacement for the old PHP
-Spotweb — this is it.
+**A modern Spotweb.** Self-hosted Spotnet indexer for Usenet, with a Newznab API
+for Radarr, Sonarr and Prowlarr — and a UI you'll actually want to browse.
 
-> **Keywords:** spotweb, spotweb alternative, modern spotweb, spotnet, usenet, newznab indexer,
-> nzb, self-hosted usenet, FastAPI.
+[![CI](https://github.com/FornaxMedia/SpotwebNG/actions/workflows/forge-ci.yml/badge.svg)](https://github.com/FornaxMedia/SpotwebNG/actions)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](#run-it)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-## Why SpotwebNG
+![SpotwebNG browsing spots](docs/img/browse.png)
 
-The original Spotweb is powerful but dated: PHP, end-of-life dependencies, a heavy server-rendered
-UI, and a security audit that ships switched off. SpotwebNG keeps what Spotnet does well and
-modernizes everything around it:
+</div>
 
-- ⚡ **Newznab API** — `caps`, `search`, `tvsearch`, `movie`, `get`. Drop it into **Radarr,
-  Sonarr, Prowlarr** or any Newznab client as a regular indexer.
-- 🎬 **Modern web UI** — Netflix-style poster grid with a one-click **table-view toggle** and
-  rich detail pages.
-- 🧭 **Setup wizard** — choose from a catalog of **68 Usenet providers** (host/port/SSL autofill);
-  you just add your username and password.
-- 🐘 **Postgres** via SQLAlchemy 2.0 async (a local SQLite file works out of the box for dev).
-- 🐳 **Docker-first** deployment.
+## What it is
+
+Spotnet is a Usenet community that publishes signed "spots" — posts describing content
+available on Usenet. [Spotweb](https://github.com/spotweb/spotweb) has indexed them since
+2011 and still works, but it is PHP from another era.
+
+**SpotwebNG is a ground-up rebuild** in Python: the same Spotnet retrieval engine and
+category system, a Newznab API your existing tools already speak, and a browsing
+experience built for how people actually look for things.
+
+It is not a fork. The wire format, category tree and filter grammar were re-derived from
+the Spotweb source so behaviour matches; everything else is new.
+
+## Why you might want it
+
+|  | Spotweb | SpotwebNG |
+|---|---|---|
+| Stack | PHP 7, jQuery | Python 3.11, FastAPI, async SQLAlchemy |
+| Install | web server + PHP + database | `docker compose up -d` |
+| Browsing | dense tables | poster grid with cover art, or a table if you prefer |
+| Filtering | category tree | the same tree grammar, with **live counts on every option** |
+| Accounts | full ACL system | admin / viewer roles, throttled login |
+| API | Newznab | Newznab, per-client keys with last-used tracking |
+
+## Screenshots
+
+| Filtering by category | Spot detail |
+|---|---|
+| ![Filters](docs/img/filters.png) | ![Detail](docs/img/detail.png) |
+
+<details>
+<summary>Settings</summary>
+
+![Settings](docs/img/settings.png)
+
+</details>
 
 ## Run it
 
-### Quick look (no infra — SQLite + demo data)
 ```bash
-git clone https://github.com/Mx4flav0r/SpotwebNG.git
+git clone https://github.com/FornaxMedia/SpotwebNG.git
 cd SpotwebNG
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn app.main:app --reload --port 7979
-# open http://localhost:7979  (first run redirects to /setup)
+docker compose up -d
 ```
 
-### Docker (recommended)
+Open <http://localhost:7979>. The setup wizard asks for an administrator login first —
+**complete it, because until you do the instance is open to anyone who can reach it** —
+then your Usenet provider, picked from a built-in catalogue of 68 with host, port and TLS
+filled in for you. The connection is tested before anything is saved.
+
+Everything lives in one Docker volume: the database, cached cover art and assembled NZBs.
+
+<details>
+<summary>Without Docker</summary>
 
 ```bash
-docker compose up -d          # http://localhost:7979
+python -m venv .venv && .venv/bin/pip install -r requirements.txt
+.venv/bin/uvicorn app.main:app --host 0.0.0.0 --port 7979
 ```
 
-One container, one volume. The database, spot covers and cached NZBs all live in `/data`,
-so they survive an image upgrade. The app generates its own Newznab API key on first boot
-(look for it in `docker compose logs`), and the setup wizard creates the administrator —
-until you complete it, the instance is open, so do it first.
+SQLite is the zero-config default; set `SPOTWEBNEXT_DATABASE_URL` to a
+`postgresql+asyncpg://` URL to use Postgres instead.
 
-### Production (Postgres, Docker)
-```bash
-SPOTWEBNEXT_API_KEY=your-strong-key docker compose up --build
-```
+</details>
 
 ## Use it as an indexer
 
-In any Newznab client (Radarr / Sonarr / Prowlarr), add a **Newznab** indexer pointing at:
+In Radarr, Sonarr or Prowlarr, add a **Newznab** indexer:
 
-- URL: `http://<your-host>:7979`
-- API key: the key shown in the setup wizard
+- **URL** — `http://your-host:7979/api`
+- **API key** — Settings → API access. Create one key per client, so you can revoke a
+  single client without breaking the others.
 
-It serves `GET /api?t=search&q=…&apikey=…&cat=…` and works alongside your other indexers.
+Supports `t=caps`, `search`, `tvsearch`, `movie`, `music` and `get`. `t=get` returns a
+**real NZB**, assembled from the spot's Usenet segments — not a stub.
 
-## What works today
+## How it works
 
-- **Native Spotnet retrieval** — reads spot headers from `free.pt` over NNTP, parses the
-  Spotnet wire format (category/subcategory/size packed into the `From` header), and keeps
-  an incremental bookmark with article-renumber protection.
-- **Full-spot enrichment** — fetches each spot's `X-XML` payload for its description, cover
-  image and NZB segment list. Covers are served locally; **`t=get` returns a real NZB**.
-- **Spotweb-compatible filtering** — the `tree` syntax (`cat0_z0_a9`, `~cat0_z3` to exclude),
-  OR within a dimension and AND across them, with live counts on every option.
-- **Newznab API** for Radarr / Sonarr / Prowlarr, with per-client API keys.
-- **Accounts** — administrators configure the instance, viewers only browse.
-- **Retention** — keep spots listed but drop their heavy parts, or delete them outright.
+- **Retrieval** — reads spot headers from the `free.pt` newsgroup over NNTP in XOVER
+  batches, unpacking the metadata Spotnet packs into the `From` header. The position
+  bookmark is validated by message-id, so article renumbering on the server cannot make
+  the indexer skip or replay a range.
+- **Enrichment** — fetches each spot's full XML payload for its description, cover art and
+  NZB segment list. Covers are cached and served locally.
+- **Filtering** — implements Spotweb's `tree` grammar (`cat0_z0_a9`, `~` to exclude): OR
+  within a dimension, AND across dimensions. All 283 Spotnet category codes are included
+  under their real names.
+- **Retention** — keep spots listed while dropping their heavy parts, or delete them
+  outright. Without a policy an index grows forever.
 
-## Roadmap
+## Configuration
 
-- Comments and reports groups (ratings, spam reports).
-- Saved filters and per-user watchlist / seen state.
-- Desktop clients (see `docs/` once published).
+Everything is configurable in the UI. Environment variables (prefix `SPOTWEBNEXT_`) exist
+for deployments:
 
-## Configuration (env, prefix `SPOTWEBNEXT_`)
-
-| Variable | Default | Notes |
+| Variable | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | local SQLite file | set to `postgresql+asyncpg://…` for production |
-| `DEFAULT_API_KEY` | a key generated on first boot (see the logs, or Settings → API access) | the Newznab key clients authenticate with |
-| `SEED_DEMO_DATA` | `true` | seed demo spots on first boot; set `false` in production |
+| `DATABASE_URL` | SQLite file | `postgresql+asyncpg://…` for Postgres |
+| `SEED_DEMO_DATA` | `true` | demo spots on first boot so the UI is not empty |
+| `APP_NAME` | `SpotwebNG` | shown in the UI and in Newznab caps |
+
+`SPOTWEBNG_DATA` sets where cover art and NZBs are written; the Docker image points it at
+the volume.
+
+## Status
+
+Working today: retrieval, enrichment, filtering, the Newznab API, accounts and retention.
+Not yet: comments and reports groups, saved filters, per-user watchlists.
+
+Contributions welcome. Tests run with `pytest`; `ruff` and `mypy` gate every commit.
+
+## Credits
+
+The Spotnet wire format, category tree and filter semantics are derived from
+[Spotweb](https://github.com/spotweb/spotweb) by the Spotweb contributors. This project
+reimplements them and shares no code.
 
 ## License
 
-MIT — same spirit as the original Spotweb.
+Apache 2.0 — see [LICENSE](LICENSE).
+
+<!--
+Keywords: spotweb alternative, modern spotweb, spotnet indexer, usenet indexer,
+newznab indexer, nzb indexer, self-hosted usenet, radarr sonarr prowlarr indexer,
+spotweb docker, python usenet indexer, spotnet.
+-->
