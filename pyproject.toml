@@ -56,3 +56,12 @@ warn_redundant_casts = true
 module = ["app.spotnet", "app.filters", "app.settings_store", "app.retention"]
 disallow_untyped_defs = true
 disallow_incomplete_defs = true
+
+[tool.coverage.run]
+# Without a source, a bare `--cov` measures every imported module including
+# site-packages: slow, and it makes the threshold meaningless.
+source = ["app"]
+omit = ["*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_also = ["if TYPE_CHECKING:", "raise NotImplementedError"]
