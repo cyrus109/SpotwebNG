@@ -106,9 +106,16 @@ async def test_unresolvable_host_reports_host_field():
     assert result["field"] == "host"
 
 
-async def test_silent_server_times_out(unused_tcp_port_factory=None):
+async def test_silent_server_times_out():
+    """A server that accepts the connection then never speaks must time out."""
+    release = asyncio.Event()
+
     async def silent(reader, writer):
-        await asyncio.sleep(10)
+        # Hold the connection open until the assertions are done. Waiting on an
+        # event rather than sleeping matters: from Python 3.12 `wait_closed()`
+        # blocks until every handler returns, so a fixed sleep hangs teardown.
+        await release.wait()
+        writer.close()
 
     server = await asyncio.start_server(silent, "127.0.0.1", 0)
     port = server.sockets[0].getsockname()[1]
@@ -118,5 +125,6 @@ async def test_silent_server_times_out(unused_tcp_port_factory=None):
         assert result["field"] == "host"
         assert "time" in result["message"].lower()
     finally:
+        release.set()
         server.close()
         await server.wait_closed()
