@@ -6,10 +6,34 @@ and looks healthy.
 """
 
 import asyncio
+from contextlib import asynccontextmanager
 
 import pytest
 
 from app import main as app_main
+
+
+@pytest.fixture(autouse=True)
+def no_real_database(monkeypatch):
+    """The loops open their own sessions. Give them a stub so a test never
+    touches a real SQLite file (which on CI does not exist and can block)."""
+
+    @asynccontextmanager
+    async def fake_session():
+        yield object()
+
+    monkeypatch.setattr(app_main, "SessionLocal", fake_session)
+    monkeypatch.setattr(app_main, "load_settings", _fake_settings)
+    monkeypatch.setattr(app_main, "prune_old_spots", _noop)
+    monkeypatch.setattr(app_main, "sweep_expired_sessions", _noop)
+
+
+async def _fake_settings(session):
+    return {"retrieve_interval": 1, "retrieve_backfill": 100, "auto_enrich": True}
+
+
+async def _noop(session, *args, **kwargs):
+    return {"deleted": 0, "stripped": 0}
 
 
 async def _run_briefly(coro_fn, seconds: float = 0.25):
