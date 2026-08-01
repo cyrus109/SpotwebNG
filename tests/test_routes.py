@@ -281,3 +281,52 @@ async def test_login_page_renders_when_an_account_exists(client):
         await create_user(s, "boss", "pw-boss-12345", ADMIN)
     resp = await c.get("/login")
     assert resp.status_code == 200 and "Sign in" in resp.text
+
+
+async def test_admin_can_reset_another_users_password(client):
+    """Resetting a password must also end that user's sessions."""
+    from sqlalchemy import select
+
+    from app.auth import VIEWER, verify_credentials
+    from app.models import Session as SessionRow
+
+    c, factory = client
+    await _admin(c, factory)
+    await c.post(
+        "/settings/users",
+        data={"username": "vic", "password": "old-password-1", "role": VIEWER},
+    )
+    async with factory() as s:
+        from app.models import User
+
+        vic = (await s.execute(select(User).where(User.username == "vic"))).scalar_one()
+
+    await c.post(
+        "/settings/users/password",
+        data={"user_id": vic.id, "password": "new-password-1"},
+    )
+    async with factory() as s:
+        assert await verify_credentials(s, "vic", "new-password-1") is not None
+        remaining = (
+            (await s.execute(select(SessionRow).where(SessionRow.user_id == vic.id)))
+            .scalars()
+            .all()
+        )
+    assert remaining == []
+
+
+async def test_stored_cover_art_is_served(client, tmp_path, monkeypatch):
+    from sqlalchemy import select
+
+    from app import web
+
+    monkeypatch.setattr(web, "IMAGES_DIR", tmp_path)
+    c, factory = client
+    async with factory() as s:
+        spot = (await s.execute(select(Spot))).scalars().first()
+        spot_id = spot.id
+    (tmp_path / f"{spot_id}.jpg").write_bytes(b"\xff\xd8\xff\xe0fake-jpeg")
+
+    resp = await c.get(f"/image/{spot_id}")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "image/jpeg"

@@ -57,7 +57,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
-      - run: uv run pip-audit
+      # Audit what we ship (the pinned runtime dependencies) rather than the
+      # runner's own pip/setuptools, which we neither control nor distribute.
+      - run: uv run pip-audit --requirement requirements.txt
       - uses: gitleaks/gitleaks-action@v2
 
   sbom:

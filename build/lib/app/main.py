@@ -44,6 +44,7 @@ logger = logging.getLogger("spotwebng")
 RETRIEVE_INTERVAL = 15 * 60  # seconds between automatic retrievals
 ENRICH_INTERVAL = 20  # seconds between enrichment batches
 ENRICH_BATCH = 50
+ENRICH_STARTUP_DELAY = 10  # let the first retrieval get going
 
 
 async def _retrieve_loop() -> None:
@@ -71,7 +72,7 @@ async def _retrieve_loop() -> None:
 
 async def _enrich_loop() -> None:
     """Continuously enrich pending spots (newest first) with full-XML data."""
-    await asyncio.sleep(10)  # let the first retrieval get going
+    await asyncio.sleep(ENRICH_STARTUP_DELAY)
     while True:
         try:
             async with SessionLocal() as session:
