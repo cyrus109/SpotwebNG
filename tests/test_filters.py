@@ -173,3 +173,29 @@ async def test_sorting(session):
 async def test_tree_combines_with_text_search(session):
     rows, _ = await search_spots(session, query="Spot", tree="cat0_z0_a9", sort="new")
     assert {r.title for r in rows} == {"Spot 1", "Spot 6"}
+
+
+async def test_search_matches_all_terms_regardless_of_separator(session):
+    """Release titles use dots; a client sends spaces. Both must match."""
+    session.add(
+        Spot(
+            message_id="<tv@x>",
+            title="Silo.S03E05.Memory.1080p.ATVDL.DDP5.1-GP",
+            posted_at=NOW,
+            category=5040,
+            spot_category=0,
+            subcat_z="z1|",
+        )
+    )
+    await session.commit()
+
+    rows, _ = await search_spots(session, query="Silo S03E05")
+    assert [r.title for r in rows] == ["Silo.S03E05.Memory.1080p.ATVDL.DDP5.1-GP"]
+
+    # order of the terms must not matter
+    rows, _ = await search_spots(session, query="S03E05 Silo")
+    assert len(rows) == 1
+
+    # a term that is not present still excludes the row
+    rows, _ = await search_spots(session, query="Silo S09E99")
+    assert rows == []

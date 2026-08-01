@@ -73,16 +73,87 @@ SQLite is the zero-config default; set `SPOTWEBNEXT_DATABASE_URL` to a
 
 </details>
 
-## Use it as an indexer
+## Connect your download tools
 
-In Radarr, Sonarr or Prowlarr, add a **Newznab** indexer:
+SpotwebNG speaks the **Newznab API**, which almost every Usenet tool already
+understands. Get a key from **Settings → API access** (one per client, so you can
+revoke one without breaking the rest), then point tools at:
 
-- **URL** — `http://your-host:7979/api`
-- **API key** — Settings → API access. Create one key per client, so you can revoke a
-  single client without breaking the others.
+```
+http://your-host:7979/api
+```
 
-Supports `t=caps`, `search`, `tvsearch`, `movie`, `music` and `get`. `t=get` returns a
-**real NZB**, assembled from the spot's Usenet segments — not a stub.
+Worth knowing before you start: **SABnzbd and NZBGet are downloaders, not
+searchers.** They fetch NZB files but do not query indexers. The search side is
+handled by Prowlarr or the *arr apps, which then hand the NZB to your downloader.
+
+### Indexer managers — configure once, share everywhere
+
+| Tool | Where | What to enter |
+|---|---|---|
+| **Prowlarr** | Indexers → Add → **Generic Newznab** | URL `http://your-host:7979`, API path `/api`, your API key |
+| **NZBHydra2** | Config → Indexers → Add → **Newznab** | Host `http://your-host:7979`, API key, then *Check caps* |
+
+This is the recommended route: add SpotwebNG once in Prowlarr and it syncs to
+Radarr, Sonarr, Lidarr and Readarr automatically.
+
+### The *arr apps — add it directly
+
+In **Settings → Indexers → Add → Newznab**:
+
+| App | Categories to select | Search it uses |
+|---|---|---|
+| **Radarr** | 2000 Movies | `t=movie` with `imdbid` or a title |
+| **Sonarr** | 5000 TV | `t=tvsearch` with season and episode |
+| **Lidarr** | 3000 Music | `t=music` with artist and album |
+| **Readarr** | 7000 Books | `t=book` with author and title |
+| **Whisparr** | 6000 Erotica | `t=search` — see the note below |
+
+Leave *Additional Parameters* empty. If a client reports "indexer does not
+support this search", check that its category is present in
+`http://your-host:7979/api?t=caps`.
+
+**Adult content is hidden by default.** While *Settings → Display → Hide adult
+content* is on, the 6000 range is not advertised in caps, is not returned by any
+search, and its covers are not served — so Whisparr will find nothing until an
+administrator turns the setting off. Only administrators can change it.
+
+Mylar3 asks for comics (category 7030), which Spotnet does not file separately,
+so it has nothing useful to match against.
+
+### Downloaders — subscribe to a feed
+
+The API returns a standard RSS 2.0 feed whose items carry an NZB `<enclosure>`,
+so a downloader can grab new spots without any indexer app in between.
+
+**SABnzbd** — Config → RSS → add a feed:
+
+```
+http://your-host:7979/api?t=search&cat=2040&apikey=YOUR_KEY
+```
+
+Set a filter (for example `Accept` on a title pattern), tick *Read the feed*, and
+SABnzbd will download matching spots as they appear. Swap `cat=` for the
+categories you want; `2040` is Movies/HD, `5040` is TV/HD, `3040` lossless music.
+
+**NZBGet** has no built-in RSS reader — use Prowlarr or an *arr app in front of
+it, or one of the community RSS extension scripts.
+
+### Mobile and browser
+
+- **nzb360** (Android) — add under *Indexers* as Newznab with the URL and key.
+- **LunaSea** / **nzbUnity** — anywhere that accepts a Newznab indexer works.
+
+### Check it yourself
+
+```bash
+curl "http://your-host:7979/api?t=caps"                                   # no key needed
+curl "http://your-host:7979/api?t=search&q=ubuntu&apikey=YOUR_KEY"        # a search
+curl -O "http://your-host:7979/api?t=get&id=123&apikey=YOUR_KEY"          # a real NZB
+```
+
+If `t=caps` answers but a client refuses, it is nearly always the API path: some
+clients want the base URL, others the full `/api`.
 
 ## How it works
 

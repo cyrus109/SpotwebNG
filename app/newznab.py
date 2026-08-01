@@ -22,7 +22,14 @@ from .categories import CATEGORIES
 from .config import NZB_DIR, get_settings
 from .db import get_session
 from .models import ApiUser, Spot
-from .spots import get_spot_by_message_id, search_spots
+from .settings_store import load_settings
+from .spots import (
+    ADULT_CATEGORY_HIGH,
+    ADULT_CATEGORY_LOW,
+    get_spot_by_message_id,
+    is_adult_spot,
+    search_spots,
+)
 
 
 async def _real_nzb(session: AsyncSession, spot: Spot) -> bytes | None:
@@ -89,7 +96,7 @@ async def _valid_key(apikey: str, session: AsyncSession) -> bool:
     return res.scalar_one_or_none() is not None
 
 
-def _caps_xml() -> Response:
+def _caps_xml(hide_adult: bool = False) -> Response:
     root = Element("caps")
     server = SubElement(root, "server")
     server.set("title", get_settings().app_name)
@@ -102,9 +109,16 @@ def _caps_xml() -> Response:
         {"available": "yes", "supportedParams": "q,season,ep,tvmazeid,rid"},
     )
     SubElement(searching, "movie-search", {"available": "yes", "supportedParams": "q,imdbid"})
+    # Lidarr and Readarr read these and refuse an indexer that omits their mode.
+    SubElement(searching, "audio-search", {"available": "yes", "supportedParams": "q,artist,album"})
+    SubElement(searching, "book-search", {"available": "yes", "supportedParams": "q,author,title"})
     cats = SubElement(root, "categories")
     parents: dict[int, Element] = {}
     for cid, name, parent in CATEGORIES:
+        # Never advertise a category the instance refuses to serve — a client
+        # that maps to it would only ever get empty results.
+        if hide_adult and ADULT_CATEGORY_LOW <= cid <= ADULT_CATEGORY_HIGH:
+            continue
         if parent == 0:
             el = SubElement(cats, "category", {"id": str(cid), "name": name})
             parents[cid] = el
@@ -149,6 +163,13 @@ async def newznab(
     apikey: str = Query(""),
     q: str = Query(""),
     imdbid: str = Query(""),
+    # Clients send their own field names rather than a bare q.
+    artist: str = Query(""),  # Lidarr
+    album: str = Query(""),  # Lidarr
+    author: str = Query(""),  # Readarr
+    title: str = Query(""),  # Readarr
+    season: str = Query(""),  # Sonarr
+    ep: str = Query(""),  # Sonarr
     cat: str = Query(""),
     id: str = Query(""),
     offset: int = Query(0),
@@ -156,8 +177,11 @@ async def newznab(
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     # caps requires no auth (clients probe it before configuring a key).
+    prefs = await load_settings(session)
+    hide_adult = bool(prefs["hide_adult"])
+
     if t in ("caps", "c"):
-        return _caps_xml()
+        return _caps_xml(hide_adult)
 
     if not apikey or not await _valid_key(apikey, session):
         return _error(100, "Incorrect user credentials")
@@ -173,7 +197,7 @@ async def newznab(
             if id.isdigit()
             else await get_spot_by_message_id(session, id)
         )
-        if spot is None:
+        if spot is None or (hide_adult and is_adult_spot(spot)):
             return _error(300, "No such item")
         real = await _real_nzb(session, spot)
         if real is not None:
@@ -194,13 +218,21 @@ async def newznab(
         )
         return Response(content=nzb, media_type="application/x-nzb")
 
-    if t in ("search", "s", "tvsearch", "t", "movie", "m", "music"):
+    if t in ("search", "s", "tvsearch", "t", "movie", "m", "music", "a", "book", "b"):
         cats = [int(c) for c in cat.split(",") if c.strip().isdigit()] or None
+        # Fold the client-specific fields into one search term.
+        terms = [part for part in (q, artist, album, author, title) if part]
+        if t in ("tvsearch", "t") and season:
+            terms.append(f"S{int(season):02d}" if season.isdigit() else season)
+            if ep:
+                terms[-1] += f"E{int(ep):02d}" if ep.isdigit() else ep
+        q = " ".join(terms)
         rows, total = await search_spots(
             session,
             query=q or None,
             categories=cats,
             imdb_id=imdbid or None,
+            exclude_adult=hide_adult,
             offset=offset,
             limit=limit,
         )

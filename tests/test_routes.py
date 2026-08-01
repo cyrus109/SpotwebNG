@@ -330,3 +330,136 @@ async def test_stored_cover_art_is_served(client, tmp_path, monkeypatch):
     resp = await c.get(f"/image/{spot_id}")
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "image/jpeg"
+
+
+# --- client compatibility --------------------------------------------
+
+
+async def test_caps_advertises_every_search_mode_we_support(client):
+    """Lidarr and Readarr read caps and refuse an indexer that omits their mode."""
+    import xml.etree.ElementTree as ET
+
+    c, _ = client
+    root = ET.fromstring((await c.get("/api?t=caps")).text)
+    searching = {child.tag: child.get("available") for child in root.find("searching")}
+    for mode in ("search", "tv-search", "movie-search", "audio-search", "book-search"):
+        assert searching.get(mode) == "yes", mode
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "t=music&artist=Miles&album=Kind+of+Blue",  # Lidarr
+        "t=book&author=Tolkien&title=Hobbit",  # Readarr
+        "t=tvsearch&q=Show&season=2&ep=5",  # Sonarr
+        "t=movie&imdbid=0111161",  # Radarr
+    ],
+)
+async def test_client_search_shapes_are_accepted(client, query):
+    """Each *arr sends its own parameters; none may produce an error document."""
+    c, _ = client
+    resp = await c.get(f"/api?{query}&apikey={KEY}")
+    assert resp.status_code == 200
+    assert "<error" not in resp.text
+
+
+# --- the adult filter must hold on every surface -----------------------
+
+
+@pytest.fixture
+async def with_adult(client):
+    """A client whose index contains one erotica spot, with hiding enabled."""
+    from app.models import Setting as SettingRow
+
+    c, factory = client
+    async with factory() as s:
+        s.add(
+            Spot(
+                message_id="<xxx@x>",
+                title="Definitely Not Safe For Work",
+                posted_at=NOW,
+                category=6040,
+                spot_category=0,
+                subcat_z="z3|",
+                size=1,
+                enriched=1,
+            )
+        )
+        # 18 spots in the real index carry z3 but sit outside the 6xxx range,
+        # so category alone is not a sufficient test.
+        s.add(
+            Spot(
+                message_id="<xxx2@x>",
+                title="Also Not Safe, Filed Under Movies",
+                posted_at=NOW,
+                category=2040,
+                spot_category=0,
+                subcat_z="z3|",
+                size=1,
+                enriched=1,
+            )
+        )
+        s.add(SettingRow(key="hide_adult", value="yes"))
+        await s.commit()
+    return c, factory
+
+
+async def _adult_ids(factory):
+    from sqlalchemy import select
+
+    async with factory() as s:
+        rows = (await s.execute(select(Spot).where(Spot.subcat_z.like("%z3|%")))).scalars().all()
+        return [r.id for r in rows]
+
+
+async def test_api_search_hides_adult_when_the_admin_hid_it(with_adult):
+    """An RSS feed is the easiest way for hidden content to reach a screen."""
+    c, _ = with_adult
+    body = (await c.get(f"/api?t=search&apikey={KEY}")).text
+    assert "Not Safe" not in body
+
+
+async def test_api_cannot_be_asked_for_the_adult_category_directly(with_adult):
+    c, _ = with_adult
+    body = (await c.get(f"/api?t=search&cat=6000&apikey={KEY}")).text
+    assert "Not Safe" not in body
+
+
+async def test_caps_omits_the_adult_category_when_hidden(with_adult):
+    """A client must not offer a category the instance refuses to serve."""
+    c, _ = with_adult
+    assert 'id="6000"' not in (await c.get("/api?t=caps")).text
+
+
+async def test_detail_page_of_a_hidden_adult_spot_is_a_404(with_adult):
+    c, factory = with_adult
+    for spot_id in await _adult_ids(factory):
+        assert (await c.get(f"/spot/{spot_id}")).status_code == 404
+
+
+async def test_cover_art_of_a_hidden_adult_spot_is_not_served(with_adult, tmp_path, monkeypatch):
+    """This is the exact failure that put adult images on a public page."""
+    from app import web
+
+    monkeypatch.setattr(web, "IMAGES_DIR", tmp_path)
+    c, factory = with_adult
+    for spot_id in await _adult_ids(factory):
+        (tmp_path / f"{spot_id}.jpg").write_bytes(b"\xff\xd8\xff\xe0porn")
+        assert (await c.get(f"/image/{spot_id}")).status_code == 404
+
+
+async def test_adult_content_is_served_when_the_admin_allows_it(with_adult):
+    """The filter is a setting, not a ban — an admin can still turn it off."""
+    from sqlalchemy import select
+
+    from app.models import Setting as SettingRow
+
+    c, factory = with_adult
+    async with factory() as s:
+        row = (
+            await s.execute(select(SettingRow).where(SettingRow.key == "hide_adult"))
+        ).scalar_one()
+        row.value = "no"
+        await s.commit()
+    body = (await c.get(f"/api?t=search&apikey={KEY}")).text
+    assert "Not Safe" in body

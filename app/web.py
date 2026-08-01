@@ -53,7 +53,7 @@ from .models import ApiUser, Setting, Spot, User
 from .nntp_check import check_nntp
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
 from .settings_store import load_settings, save_settings
-from .spots import get_spot, search_spots
+from .spots import get_spot, is_adult_spot, search_spots
 
 router = APIRouter()
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
@@ -168,8 +168,19 @@ async def home(
     )
 
 
+async def _adult_and_hidden(session: AsyncSession, spot_id: int) -> bool:
+    """True when this spot is adult and the instance is configured to hide it."""
+    prefs = await load_settings(session)
+    if not prefs["hide_adult"]:
+        return False
+    spot = await get_spot(session, spot_id)
+    return spot is not None and is_adult_spot(spot)
+
+
 @router.get("/image/{spot_id}")
-async def spot_image(spot_id: int) -> Response:
+async def spot_image(spot_id: int, session: AsyncSession = Depends(get_session)) -> Response:
+    if await _adult_and_hidden(session, spot_id):
+        return HTMLResponse("Not found", status_code=404)
     path = IMAGES_DIR / f"{spot_id}.jpg"
     if not path.exists():
         return HTMLResponse("Not found", status_code=404)
@@ -182,6 +193,11 @@ async def detail(
 ) -> HTMLResponse:
     spot = await get_spot(session, spot_id)
     if spot is None:
+        return HTMLResponse("Not found", status_code=404)
+    prefs = await load_settings(session)
+    if prefs["hide_adult"] and is_adult_spot(spot):
+        # Hidden means unreachable, not merely absent from listings: a direct
+        # link, a search engine or a stale bookmark must not open it either.
         return HTMLResponse("Not found", status_code=404)
     if spot.enriched == 0:
         # Fetch the full spot (description/image/NZB) the first time it's viewed.

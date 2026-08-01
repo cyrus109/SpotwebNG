@@ -12,6 +12,28 @@ from .categories import expand_categories
 from .filters import tree_conditions
 from .models import Spot
 
+# Spotnet files erotica under the z3 genre. Most of it also lands in the 6xxx
+# Newznab range, but not all — 18 spots in a real index carry z3 while sitting
+# under Movies — so the category alone is not a safe test.
+ADULT_CATEGORY_LOW = 6000
+ADULT_CATEGORY_HIGH = 6999
+
+
+def adult_condition() -> Any:
+    """Matches every spot the adult filter is meant to hide."""
+    return or_(
+        Spot.category.between(ADULT_CATEGORY_LOW, ADULT_CATEGORY_HIGH),
+        Spot.subcat_z.like("%z3|%"),
+    )
+
+
+def is_adult_spot(spot: Spot) -> bool:
+    """The row-level form of `adult_condition`, for single-spot routes."""
+    if ADULT_CATEGORY_LOW <= (spot.category or 0) <= ADULT_CATEGORY_HIGH:
+        return True
+    return "z3|" in (spot.subcat_z or "")
+
+
 SORTS: dict[str, Any] = {
     "new": Spot.posted_at.desc(),
     "old": Spot.posted_at.asc(),
@@ -30,6 +52,7 @@ async def search_spots(
     min_size: int | None = None,
     max_size: int | None = None,
     since: datetime | None = None,
+    exclude_adult: bool = False,
     sort: str = "new",
     offset: int = 0,
     limit: int = 100,
@@ -41,12 +64,18 @@ async def search_spots(
 
     conds = []
     if query:
-        like = f"%{query}%"
-        conds.append(or_(Spot.title.ilike(like), Spot.description.ilike(like)))
+        # Match every word independently. Release titles are dot-separated
+        # ("Silo.S03E05.Memory") while clients send spaces ("Silo S03E05"), so a
+        # single contiguous LIKE would never match.
+        for term in query.split():
+            like = f"%{term}%"
+            conds.append(or_(Spot.title.ilike(like), Spot.description.ilike(like)))
     if imdb_id:
         conds.append(Spot.imdb_id == imdb_id.lstrip("t"))
     if categories:
         conds.append(Spot.category.in_(expand_categories(categories)))
+    if exclude_adult:
+        conds.append(~adult_condition())
     if tree:
         conds.extend(tree_conditions(tree))
     if min_size:
