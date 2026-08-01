@@ -27,7 +27,9 @@ SPEC: dict[str, tuple[Any, str]] = {
     "per_page": (120, "int"),
     "default_sort": ("new", "str"),
     "default_view": ("grid", "str"),
-    "hide_adult": (False, "bool"),
+    # Safe by default: an unconfigured instance must never render adult
+    # covers, and only an admin can turn this off.
+    "hide_adult": (True, "bool"),
     "site_name": ("SpotwebNG", "str"),
     "theme": ("liquid-glass", "str"),
 }

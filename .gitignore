@@ -29,3 +29,7 @@ design/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+
+# Screenshots are generated from a live instance — never commit them
+# without confirming the adult-content filter was on.
+docs/img/

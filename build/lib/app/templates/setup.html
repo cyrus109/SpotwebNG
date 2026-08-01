@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block title %}Setup — {{ app_name }}{% endblock %}
+{% block content %}
+<div class="wizard">
+  <h1>Setup</h1>
+  <p class="sub">Pick your Usenet provider — connection details autofill from the built-in catalog of {{ providers|length }} providers. You only enter your username and password.</p>
+
+  <form method="post" action="/setup">
+    {% if not has_account %}
+    <div class="wizard-step">
+      <div class="wizard-step-head">
+        <h2>Create your login</h2>
+        <p>Without an account, anyone on your network can open this app and read the
+           credentials below. This is separate from your Usenet login.</p>
+      </div>
+      <div class="field-row">
+        <div class="field">
+          <label for="account_username">Username</label>
+          <input type="text" name="account_username" id="account_username" required
+                 autocomplete="username" placeholder="e.g. adminvv">
+        </div>
+        <div class="field">
+          <label for="account_password">Password</label>
+          <input type="password" name="account_password" id="account_password" required
+                 minlength="8" autocomplete="new-password" placeholder="at least 8 characters">
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="field">
+      <label for="provider_select">Usenet provider</label>
+      <select id="provider_select" onchange="fillProvider()">
+        <option value="">— Custom / manual —</option>
+        {% for p in providers %}
+        <option value="{{ loop.index0 }}" {{ 'selected' if current.get('provider_name') == p.name }}>{{ p.name }}</option>
+        {% endfor %}
+      </select>
+      <input type="hidden" name="provider_name" id="provider_name" value="{{ current.get('provider_name','') }}">
+    </div>
+
+    <div class="field">
+      <label for="provider_host">Host</label>
+      <input type="text" name="provider_host" id="provider_host" value="{{ current.get('provider_host','') }}" required placeholder="reader.example.com">
+      <div class="field-err" id="err_host" hidden></div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="provider_port">Port</label>
+        <input type="number" name="provider_port" id="provider_port" value="{{ current.get('provider_port','563') }}">
+      </div>
+      <div class="field">
+        <label for="provider_ssl">TLS encryption</label>
+        <select name="provider_ssl" id="provider_ssl">
+          <option value="yes" {{ 'selected' if current.get('provider_ssl','yes') == 'yes' }}>Yes</option>
+          <option value="no" {{ 'selected' if current.get('provider_ssl') == 'no' }}>No</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="connections">Connections</label>
+        <input type="number" name="connections" id="connections" value="{{ current.get('connections','4') }}">
+      </div>
+    </div>
+
+    <div class="field-row">
+      <div class="field">
+        <label for="username">Username</label>
+        <input type="text" name="username" id="username" value="{{ current.get('username','') }}" autocomplete="off">
+      </div>
+      <div class="field">
+        <label for="password">Password</label>
+        <input type="password" name="password" id="password" autocomplete="new-password"
+               placeholder="{{ 'unchanged — leave blank to keep' if current.get('password') else '' }}">
+        <div class="field-err" id="err_auth" hidden></div>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Newznab API key (give this to Radarr / Sonarr / Prowlarr)</label>
+      <div class="api-key-row">
+        <div class="api-key-box" id="api_key_box">{{ api_key }}</div>
+        <button class="btn-glass" type="button" id="gen_key_btn">Generate new key</button>
+      </div>
+      <div class="field-err" id="err_key" hidden></div>
+    </div>
+
+    <button class="btn-glass btn-primary" type="submit" id="save_btn" style="width:100%; padding:var(--ds-space-4)">Save &amp; continue →</button>
+    <div class="test-actions" id="test_actions" hidden>
+      <a href="#" id="test_cancel" hidden>Cancel test</a>
+      <a href="#" id="save_anyway" hidden>Save anyway →</a>
+    </div>
+  </form>
+</div>
+
+<script>
+  const PROVIDERS = {{ providers_json | safe }};
+  function fillProvider() {
+    const idx = document.getElementById('provider_select').value;
+    document.getElementById('provider_name').value = idx === '' ? '' : PROVIDERS[idx].name;
+    if (idx === '') return;
+    const p = PROVIDERS[idx];
+    const conn = p.ssl || p.plain;
+    if (!conn) return;
+    document.getElementById('provider_host').value = conn.host;
+    document.getElementById('provider_port').value = conn.port;
+    document.getElementById('provider_ssl').value = p.ssl ? 'yes' : 'no';
+  }
+
+  const form = document.querySelector('form[action="/setup"]');
+  const btn = document.getElementById('save_btn');
+  const actions = document.getElementById('test_actions');
+  const cancelLink = document.getElementById('test_cancel');
+  const saveAnyway = document.getElementById('save_anyway');
+  const errHost = document.getElementById('err_host');
+  const errAuth = document.getElementById('err_auth');
+  let controller = null;
+
+  function clearErrors() {
+    for (const [el, input] of [[errHost, 'provider_host'], [errAuth, 'password']]) {
+      el.hidden = true; el.textContent = '';
+      document.getElementById(input).classList.remove('err-outline');
+    }
+  }
+
+  function resetButton() {
+    btn.disabled = false;
+    btn.classList.remove('test-ok');
+    btn.textContent = 'Save & continue →';
+    actions.hidden = true; cancelLink.hidden = true; saveAnyway.hidden = true;
+  }
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    clearErrors();
+    btn.disabled = true;
+    btn.textContent = 'Testing connection…';
+    actions.hidden = false; cancelLink.hidden = false; saveAnyway.hidden = true;
+    controller = new AbortController();
+    try {
+      const resp = await fetch('/setup/test', { method: 'POST', body: new FormData(form), signal: controller.signal });
+      const r = await resp.json();
+      if (r.ok) {
+        btn.classList.add('test-ok');
+        btn.textContent = '✓ ' + r.message;
+        actions.hidden = true;
+        setTimeout(() => form.submit(), 700);
+      } else {
+        const el = r.field === 'auth' ? errAuth : errHost;
+        const input = r.field === 'auth' ? 'password' : 'provider_host';
+        el.textContent = r.message; el.hidden = false;
+        document.getElementById(input).classList.add('err-outline');
+        btn.disabled = false;
+        btn.textContent = 'Save & continue →';
+        cancelLink.hidden = true; saveAnyway.hidden = false;
+      }
+    } catch (err) {
+      if (err.name === 'AbortError') { resetButton(); return; }
+      errHost.textContent = 'Connection test failed: ' + err; errHost.hidden = false;
+      btn.disabled = false;
+      btn.textContent = 'Save & continue →';
+      cancelLink.hidden = true; saveAnyway.hidden = false;
+    }
+  });
+
+  cancelLink.addEventListener('click', (e) => { e.preventDefault(); if (controller) controller.abort(); });
+  saveAnyway.addEventListener('click', (e) => { e.preventDefault(); form.submit(); });
+
+  document.getElementById('gen_key_btn').addEventListener('click', async () => {
+    if (!confirm('Generate a new API key? The current key stops working immediately — update Radarr/Sonarr/Prowlarr afterwards.')) return;
+    const errKey = document.getElementById('err_key');
+    errKey.hidden = true;
+    try {
+      const resp = await fetch('/setup/apikey', { method: 'POST' });
+      const r = await resp.json();
+      document.getElementById('api_key_box').textContent = r.key;
+    } catch (err) {
+      errKey.textContent = 'Could not generate a key: ' + err; errKey.hidden = false;
+    }
+  });
+</script>
+{% endblock %}

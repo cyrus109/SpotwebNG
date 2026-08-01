@@ -29,7 +29,7 @@ async def test_defaults_apply_when_nothing_is_stored(session):
     assert values["per_page"] == DEFAULTS["per_page"]
     assert values["retention_days"] == 0  # 0 = keep forever
     assert values["retention_type"] == "fullonly"
-    assert values["hide_adult"] is False
+    assert values["hide_adult"] is True  # safe by default
 
 
 async def test_settings_round_trip_with_types(session):

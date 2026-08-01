@@ -1,0 +1,584 @@
+"""Web UI routes — the modern, Netflix-style browsing experience + setup wizard."""
+
+from __future__ import annotations
+
+import json
+import secrets
+from datetime import UTC, datetime, timedelta
+
+from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi.responses import (
+    FileResponse,
+    HTMLResponse,
+    JSONResponse,
+    RedirectResponse,
+    Response,
+)
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .auth import (
+    ADMIN,
+    COOKIE,
+    ROLES,
+    SESSION_DAYS,
+    VIEWER,
+    account_exists,
+    clear_login_failures,
+    count_admins,
+    create_user,
+    end_session,
+    is_admin,
+    login_locked,
+    record_login_failure,
+    revoke_all_sessions,
+    set_password,
+    start_session,
+    user_for_session,
+    verify_credentials,
+)
+from .categories import CATEGORY_NAMES
+from .config import BASE_DIR, IMAGES_DIR, get_settings, load_providers
+from .db import get_session
+from .facets import option_counts, section_counts, section_dimensions
+from .filters import (
+    FILTER_SECTIONS,
+    base_tree,
+    section_for,
+    tree_targets_adult,
+    visible_sections,
+)
+from .models import ApiUser, Setting, Spot, User
+from .nntp_check import check_nntp
+from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
+from .settings_store import load_settings, save_settings
+from .spots import get_spot, search_spots
+
+router = APIRouter()
+templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+
+
+def _gb(size: int) -> str:
+    return f"{size / 1024**3:.1f} GB" if size else "—"
+
+
+templates.env.filters["gb"] = _gb
+templates.env.filters["catname"] = lambda c: CATEGORY_NAMES.get(c, "Other")
+
+
+def _asset_v(path: str) -> int:
+    """Cache-buster: file mtime as version query, so browsers refetch changed assets."""
+    try:
+        return int((BASE_DIR / "static" / path).stat().st_mtime)
+    except OSError:
+        return 0
+
+
+templates.env.globals["asset_v"] = _asset_v
+
+
+async def _theme(session: AsyncSession) -> str:
+    """Active theme name, used as the data-theme attribute on <html>."""
+    return (await load_settings(session))["theme"]
+
+
+@router.get("/", response_class=HTMLResponse)
+async def home(
+    request: Request,
+    q: str = Query(""),
+    cat: str = Query(""),
+    tree: str = Query(""),
+    age: str = Query(""),
+    minsize: float = Query(0),
+    maxsize: float = Query(0),
+    sort: str = Query(""),
+    view: str = Query(""),
+    page: int = Query(1),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    # First-run: if no provider configured, send to the setup wizard.
+    configured = await session.get(Setting, "provider_host")
+    if configured is None:
+        return RedirectResponse("/setup")
+
+    prefs = await load_settings(session)
+    sort = sort or prefs["default_sort"]
+    view = view or prefs["default_view"]
+    # Hiding adult content is Spotweb's ~cat0_z3 filter, applied to every listing.
+    if prefs["hide_adult"]:
+        if tree_targets_adult(tree):
+            return RedirectResponse("/", status_code=303)
+        # The empty tree ("All") short-circuited, leaving adult spots visible.
+        tree = f"{tree},~cat0_z3" if tree else "cat0,cat1,cat2,cat3,~cat0_z3"
+    cat_ids = [int(c) for c in cat.split(",") if c.strip().isdigit()]
+    current = section_for(tree)
+    section_label = next((s["label"] for s in FILTER_SECTIONS if s["key"] == current), "All")
+    since = None
+    if age:
+        hours = {"24h": 24, "3d": 72, "1w": 168, "1m": 720}.get(age)
+        if hours:
+            since = datetime.now(UTC) - timedelta(hours=hours)
+    rows, total = await search_spots(
+        session,
+        query=q or None,
+        categories=cat_ids or None,
+        tree=tree or None,
+        since=since,
+        min_size=int(minsize * 1024**3) if minsize else None,
+        max_size=int(maxsize * 1024**3) if maxsize else None,
+        sort=sort,
+        offset=(max(page, 1) - 1) * prefs["per_page"],
+        limit=prefs["per_page"],
+    )
+    return templates.TemplateResponse(
+        request,
+        "browse.html",
+        {
+            "spots": rows,
+            "total": total,
+            "q": q,
+            "cat": cat,
+            "tree": tree,
+            "base_tree": base_tree(tree),
+            "age": age,
+            "minsize": minsize,
+            "maxsize": maxsize,
+            "sort": sort,
+            "sections": visible_sections(prefs["hide_adult"]),
+            "current_section": section_for(tree),
+            "section_label": section_label,
+            "counts": await section_counts(session),
+            "dimensions": await option_counts(session, tree),
+            # "All" has no single dimension set; offer them grouped by category.
+            "groups": (
+                await section_dimensions(session, prefs["hide_adult"])
+                if not section_for(tree)
+                else []
+            ),
+            "icons": RAIL_ICONS,
+            "view": view if view in ("grid", "table") else "grid",
+            "page": max(page, 1),
+            "per_page": prefs["per_page"],
+            "pages": max(1, -(-total // prefs["per_page"])),
+            "categories": CATEGORY_NAMES,
+            "app_name": get_settings().app_name,
+            "theme": await _theme(session),
+        },
+    )
+
+
+@router.get("/image/{spot_id}")
+async def spot_image(spot_id: int) -> Response:
+    path = IMAGES_DIR / f"{spot_id}.jpg"
+    if not path.exists():
+        return HTMLResponse("Not found", status_code=404)
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@router.get("/spot/{spot_id}", response_class=HTMLResponse)
+async def detail(
+    request: Request, spot_id: int, session: AsyncSession = Depends(get_session)
+) -> HTMLResponse:
+    spot = await get_spot(session, spot_id)
+    if spot is None:
+        return HTMLResponse("Not found", status_code=404)
+    if spot.enriched == 0:
+        # Fetch the full spot (description/image/NZB) the first time it's viewed.
+        try:
+            await enrich_new_spots(session, images_dir=IMAGES_DIR, limit=1, only_id=spot_id)
+            spot = await get_spot(session, spot_id)
+        except Exception:
+            pass
+    api_user = (await session.execute(select(ApiUser))).scalars().first()
+    return templates.TemplateResponse(
+        request,
+        "detail.html",
+        {
+            "spot": spot,
+            "categories": CATEGORY_NAMES,
+            "api_key": api_user.api_key if api_user else "",
+            "app_name": get_settings().app_name,
+            "theme": await _theme(session),
+        },
+    )
+
+
+@router.get("/setup", response_class=HTMLResponse)
+async def setup_form(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> HTMLResponse:
+    current = {s.key: s.value for s in (await session.execute(select(Setting))).scalars().all()}
+    api_user = (await session.execute(select(ApiUser))).scalars().first()
+    return templates.TemplateResponse(
+        request,
+        "setup.html",
+        {
+            "providers": load_providers(),
+            "providers_json": json.dumps(load_providers()),
+            "current": current,
+            "api_key": api_user.api_key if api_user else get_settings().default_api_key,
+            "has_account": await account_exists(session),
+            "app_name": get_settings().app_name,
+            "theme": await _theme(session),
+        },
+    )
+
+
+@router.post("/retrieve")
+async def retrieve_now(session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Manually fetch new spots from the configured provider."""
+    if RETRIEVE_LOCK.locked():
+        return JSONResponse(
+            {"ok": False, "message": "A retrieval is already running"}, status_code=409
+        )
+    async with RETRIEVE_LOCK:
+        try:
+            result = await retrieve_spots(session)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
+        except Exception as exc:
+            return JSONResponse(
+                {"ok": False, "message": f"Retrieval failed: {exc}"}, status_code=502
+            )
+    return JSONResponse({"ok": True, **result})
+
+
+@router.post("/setup/apikey")
+async def setup_apikey(session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Rotate the Newznab API key: revoke all existing keys, issue one new key."""
+    key = secrets.token_hex(16)
+    for user in (await session.execute(select(ApiUser))).scalars().all():
+        await session.delete(user)
+    session.add(ApiUser(name="default", api_key=key))
+    await session.commit()
+    return JSONResponse({"key": key})
+
+
+@router.post("/setup/test")
+async def setup_test(
+    provider_host: str = Form(...),
+    provider_port: int = Form(563),
+    provider_ssl: str = Form("yes"),
+    username: str = Form(""),
+    password: str = Form(""),
+) -> JSONResponse:
+    result = await check_nntp(
+        provider_host,
+        provider_port,
+        use_ssl=provider_ssl == "yes",
+        username=username,
+        password=password,
+    )
+    return JSONResponse(result)
+
+
+@router.post("/setup")
+async def setup_save(
+    session: AsyncSession = Depends(get_session),
+    account_username: str = Form(""),
+    account_password: str = Form(""),
+    provider_name: str = Form(""),
+    provider_host: str = Form(...),
+    provider_port: int = Form(563),
+    provider_ssl: str = Form("yes"),
+    username: str = Form(""),
+    password: str = Form(""),
+    connections: int = Form(4),
+) -> RedirectResponse:
+    # First run: create the login here, so a fresh install is never left open.
+    # An existing account is never overwritten from this form.
+    if account_password and not await account_exists(session):
+        await create_user(session, account_username or "admin", account_password, ADMIN)
+
+    # A blank password field means "unchanged" — the form never receives the
+    # stored secret, so an empty submission must not wipe it.
+    if not password:
+        existing_pw = await session.get(Setting, "password")
+        password = existing_pw.value if existing_pw else ""
+    values = {
+        "provider_name": provider_name,
+        "provider_host": provider_host,
+        "provider_port": str(provider_port),
+        "provider_ssl": provider_ssl,
+        "username": username,
+        "password": password,
+        "connections": str(connections),
+    }
+    for key, value in values.items():
+        existing = await session.get(Setting, key)
+        if existing:
+            existing.value = value
+        else:
+            session.add(Setting(key=key, value=value))
+    await session.commit()
+    return RedirectResponse("/", status_code=303)
+
+
+# Feather-style icons for the browse rail, keyed by section.
+RAIL_ICONS = {
+    "": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 6h16M4 12h16M4 18h16"/></svg>',
+    "movies": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M7 4v16M17 4v16M2 10h20"/></svg>',
+    "series": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><rect x="2" y="7" width="20" height="13" rx="2"/><path d="m8 3 4 4 4-4"/></svg>',
+    "books": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M4 19.5V5a2 2 0 0 1 2-2h13v18H6a2 2 0 0 1-2-2Z"/><path d="M8 7h7"/></svg>',
+    "music": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><circle cx="6" cy="17" r="3"/><circle cx="18" cy="15" r="3"/><path d="M9 17V5l12-2v12"/></svg>',
+    "games": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="2" y="6" width="20" height="12" rx="4"/><path d="M6 12h4M8 10v4M15 13h.01M18 11h.01"/></svg>',
+    "apps": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>',
+    "erotica": '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"><path d="M19 14c1.5-1.5 3-3.5 3-5.5A4.5 4.5 0 0 0 12 6a4.5 4.5 0 0 0-10 2.5C2 12 7 16 12 20c2-1.6 4.4-3.6 7-6Z"/></svg>',
+}
+
+
+# ---------- authentication ----------
+
+
+@router.get("/login", response_class=HTMLResponse)
+async def login_form(request: Request, session: AsyncSession = Depends(get_session)) -> Response:
+    if not await account_exists(session):
+        return RedirectResponse("/", status_code=303)
+    return templates.TemplateResponse(
+        request,
+        "login.html",
+        {
+            "app_name": get_settings().app_name,
+            "error": "",
+            "theme": await _theme(session),
+        },
+    )
+
+
+@router.post("/login")
+async def login_submit(
+    request: Request,
+    username: str = Form(""),
+    password: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+):
+    throttle_key = (request.client.host if request.client else "?") + "|" + username.strip().lower()
+    wait = login_locked(throttle_key)
+    if wait:
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "app_name": get_settings().app_name,
+                "error": f"Too many failed attempts. Try again in {wait // 60 + 1} minute(s).",
+                "theme": await _theme(session),
+            },
+            status_code=429,
+        )
+    user = await verify_credentials(session, username, password)
+    if user is None:
+        record_login_failure(throttle_key)
+        return templates.TemplateResponse(
+            request,
+            "login.html",
+            {
+                "app_name": get_settings().app_name,
+                "error": "Incorrect username or password.",
+                "theme": await _theme(session),
+            },
+            status_code=200,
+        )
+    clear_login_failures(throttle_key)
+    token = await start_session(session, user)
+    response = RedirectResponse("/", status_code=303)
+    response.set_cookie(
+        COOKIE,
+        token,
+        max_age=60 * 60 * 24 * SESSION_DAYS,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return response
+
+
+@router.post("/logout")
+async def logout(request: Request, session: AsyncSession = Depends(get_session)):
+    await end_session(session, request.cookies.get(COOKIE))
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(COOKIE, path="/")
+    return response
+
+
+# ---------- settings ----------
+
+
+def _dir_size(path) -> str:
+    try:
+        total = sum(f.stat().st_size for f in path.rglob("*") if f.is_file())
+    except OSError:
+        total = 0
+    for unit in ("B", "KB", "MB", "GB"):
+        if total < 1024 or unit == "GB":
+            return f"{total:.0f} {unit}" if unit == "B" else f"{total:.1f} {unit}"
+        total /= 1024
+    return "0 B"
+
+
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page(
+    request: Request,
+    saved: int = Query(0),
+    session: AsyncSession = Depends(get_session),
+) -> HTMLResponse:
+    from .config import SPOT_DATA_DIR
+
+    current = {s.key: s.value for s in (await session.execute(select(Setting))).scalars().all()}
+    spots_total = (await session.execute(select(func.count()).select_from(Spot))).scalar_one()
+    images = (
+        await session.execute(select(func.count()).select_from(Spot).where(Spot.poster_url != ""))
+    ).scalar_one()
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {
+            "values": await load_settings(session),
+            "current": current,
+            "api_keys": (await session.execute(select(ApiUser))).scalars().all(),
+            "has_account": await account_exists(session),
+            "users": (await session.execute(select(User).order_by(User.username))).scalars().all(),
+            "me": await user_for_session(session, request.cookies.get(COOKIE)),
+            "roles": ROLES,
+            "stats": {
+                "spots": spots_total,
+                "images": images,
+                "db_size": _dir_size(SPOT_DATA_DIR),
+            },
+            "base_url": str(request.base_url).rstrip("/"),
+            "saved": bool(saved),
+            "app_name": get_settings().app_name,
+            "theme": await _theme(session),
+        },
+    )
+
+
+@router.post("/settings")
+async def settings_save(request: Request, session: AsyncSession = Depends(get_session)):
+    form = dict(await request.form())
+    await save_settings(session, {k: str(v) for k, v in form.items()})
+    return RedirectResponse("/settings?saved=1", status_code=303)
+
+
+@router.post("/settings/apikey")
+async def settings_add_key(name: str = Form(...), session: AsyncSession = Depends(get_session)):
+    session.add(ApiUser(name=name.strip()[:128] or "client", api_key=secrets.token_hex(16)))
+    await session.commit()
+    return RedirectResponse("/settings#api", status_code=303)
+
+
+@router.post("/settings/apikey/delete")
+async def settings_delete_key(
+    key_id: int = Form(...), session: AsyncSession = Depends(get_session)
+):
+    row = await session.get(ApiUser, key_id)
+    if row is not None:
+        await session.delete(row)
+        await session.commit()
+    return RedirectResponse("/settings#api", status_code=303)
+
+
+@router.post("/settings/account")
+async def settings_account(
+    request: Request,
+    current_password: str = Form(""),
+    password: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+):
+    """Change your own password. Requires the current one, and signs out
+    every session so a stolen cookie cannot outlive the change."""
+    me = await user_for_session(session, request.cookies.get(COOKIE))
+    if me is None:
+        return RedirectResponse("/login", status_code=303)
+    if password:
+        if await verify_credentials(session, me.username, current_password) is None:
+            return RedirectResponse("/settings?err=password#account", status_code=303)
+        await set_password(session, me, password)
+        await revoke_all_sessions(session)
+    return RedirectResponse("/settings?saved=1#account", status_code=303)
+
+
+@router.post("/settings/users")
+async def settings_add_user(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    role: str = Form(VIEWER),
+    session: AsyncSession = Depends(get_session),
+):
+    if not await is_admin(session, request.cookies.get(COOKIE)):
+        return RedirectResponse("/", status_code=303)
+    try:
+        await create_user(session, username, password, role if role in ROLES else VIEWER)
+    except ValueError:
+        return RedirectResponse("/settings?err=user#users", status_code=303)
+    return RedirectResponse("/settings?saved=1#users", status_code=303)
+
+
+@router.post("/settings/users/delete")
+async def settings_delete_user(
+    request: Request,
+    user_id: int = Form(...),
+    session: AsyncSession = Depends(get_session),
+):
+    if not await is_admin(session, request.cookies.get(COOKIE)):
+        return RedirectResponse("/", status_code=303)
+    target = await session.get(User, user_id)
+    # Removing the last admin would lock everyone out of Settings for good.
+    if target is None or (target.role == ADMIN and await count_admins(session) <= 1):
+        return RedirectResponse("/settings?err=lastadmin#users", status_code=303)
+    await revoke_all_sessions(session, user_id=target.id)
+    await session.delete(target)
+    await session.commit()
+    return RedirectResponse("/settings?saved=1#users", status_code=303)
+
+
+@router.post("/settings/users/role")
+async def settings_set_role(
+    request: Request,
+    user_id: int = Form(...),
+    role: str = Form(VIEWER),
+    session: AsyncSession = Depends(get_session),
+):
+    if not await is_admin(session, request.cookies.get(COOKIE)):
+        return RedirectResponse("/", status_code=303)
+    target = await session.get(User, user_id)
+    if target is None:
+        return RedirectResponse("/settings#users", status_code=303)
+    if target.role == ADMIN and role != ADMIN and await count_admins(session) <= 1:
+        return RedirectResponse("/settings?err=lastadmin#users", status_code=303)
+    target.role = role if role in ROLES else VIEWER
+    await session.commit()
+    return RedirectResponse("/settings?saved=1#users", status_code=303)
+
+
+@router.post("/settings/users/password")
+async def settings_reset_user_password(
+    request: Request,
+    user_id: int = Form(...),
+    password: str = Form(...),
+    session: AsyncSession = Depends(get_session),
+):
+    if not await is_admin(session, request.cookies.get(COOKIE)):
+        return RedirectResponse("/", status_code=303)
+    target = await session.get(User, user_id)
+    if target is not None:
+        await set_password(session, target, password)
+        await revoke_all_sessions(session, user_id=target.id)
+    return RedirectResponse("/settings?saved=1#users", status_code=303)
+
+
+@router.post("/settings/test")
+async def settings_test(session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Test the saved provider credentials without reopening the wizard."""
+    stored = {s.key: s.value for s in (await session.execute(select(Setting))).scalars().all()}
+    if not stored.get("provider_host"):
+        return JSONResponse({"ok": False, "message": "No provider configured yet"})
+    result = await check_nntp(
+        stored["provider_host"],
+        int(stored.get("provider_port", 563) or 563),
+        use_ssl=stored.get("provider_ssl", "yes") == "yes",
+        username=stored.get("username", ""),
+        password=stored.get("password", ""),
+    )
+    return JSONResponse(result)

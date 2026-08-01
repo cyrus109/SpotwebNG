@@ -1,0 +1,89 @@
+{# Advanced filters: slides in from the right on desktop, bottom sheet on phones.
+   Each option carries the tree it would produce, so it works without JS too. #}
+<div class="scrim" id="scrim" hidden></div>
+<aside class="drawer" id="drawer" aria-label="Advanced filters" aria-hidden="true">
+  <div class="drawer-head">
+    <div>
+      <h2>Filters</h2>
+      <div class="drawer-sub">{{ section_label }}</div>
+    </div>
+    <input class="drawer-search" id="optSearch" type="search" placeholder="Search filters…"
+           aria-label="Search filters" autocomplete="off">
+    <button type="button" class="btn-glass btn-icon-only" id="closeDrawer" aria-label="Close filters">✕</button>
+  </div>
+
+  {% if dimensions %}
+  <div class="drawer-body">
+    <div class="drawer-dims" id="drawerDims" role="tablist">
+      {% for d in dimensions %}
+      <button type="button" class="rail-dim {{ 'on' if loop.first }}" data-dim-tab="{{ d.letter }}" role="tab">
+        <span class="rail-text">{{ d.label }}</span>
+        {% if d.chosen %}<span class="rail-pill">{{ d.chosen }}</span>
+        {% else %}<span class="rail-n">{{ d.options | length }}</span>{% endif %}
+      </button>
+      {% endfor %}
+    </div>
+
+    <div class="drawer-opts">
+      {% for d in dimensions %}
+      <section class="dim-panel {{ 'hidden' if not loop.first }}" data-dim-panel="{{ d.letter }}">
+        <div class="dim-panel-head">
+          <span>{{ d.label }}</span>
+        </div>
+        <div class="optgrid">
+          {% for o in d.options %}
+          <a class="opt {{ o.state }}" data-name="{{ o.name | lower }}"
+             href="/?q={{ q }}&tree={{ o.tree }}&sort={{ sort }}&age={{ age }}">
+            {{ o.name }}<span class="opt-n">{{ '{:,}'.format(o.count) }}</span>
+          </a>
+          {% endfor %}
+        </div>
+      </section>
+      {% endfor %}
+    </div>
+  </div>
+  <p class="drawer-hint">Click to include · click again to exclude · a third click clears it.</p>
+  {% elif groups %}
+  {# Browsing "All": dimensions differ per category, so group them and let a
+     pick both filter and switch into that category. #}
+  <div class="drawer-body">
+    <div class="drawer-dims" id="drawerDims" role="tablist">
+      {% for g in groups %}
+      <button type="button" class="rail-dim {{ 'on' if loop.first }}" data-dim-tab="{{ g.key }}" role="tab">
+        <span class="rail-text">{{ g.label }}</span>
+        <span class="rail-n">{{ g.option_total }}</span>
+      </button>
+      {% endfor %}
+    </div>
+    <div class="drawer-opts">
+      {% for g in groups %}
+      <section class="dim-panel {{ 'hidden' if not loop.first }}" data-dim-panel="{{ g.key }}">
+        {% for d in g.dimensions %}
+        <div class="dim-panel-head">{{ d.label }}</div>
+        <div class="optgrid" style="margin-bottom:var(--ds-space-4)">
+          {% for o in d.options %}
+          <a class="opt" data-name="{{ o.name | lower }}"
+             href="/?q={{ q }}&tree={{ o.tree }}&sort={{ sort }}&age={{ age }}">
+            {{ o.name }}<span class="opt-n">{{ '{:,}'.format(o.count) }}</span>
+          </a>
+          {% endfor %}
+        </div>
+        {% endfor %}
+      </section>
+      {% endfor %}
+    </div>
+  </div>
+  <p class="drawer-hint">Picking a filter here also switches you into that category.</p>
+  {% else %}
+  <div class="drawer-body">
+    <p class="drawer-empty">No spots indexed yet.</p>
+  </div>
+  {% endif %}
+
+  <div class="drawer-foot">
+    <a class="linkish" href="/?q={{ q }}&tree={{ base_tree }}&sort={{ sort }}&age={{ age }}">Reset all filters</a>
+    <span class="sp"></span>
+    <span class="match"><b>{{ '{:,}'.format(total) }}</b> spots match</span>
+    <button type="button" class="btn-glass btn-primary" id="applyDrawer">Show results</button>
+  </div>
+</aside>

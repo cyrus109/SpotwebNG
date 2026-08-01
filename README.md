@@ -40,16 +40,10 @@ the Spotweb source so behaviour matches; everything else is new.
 
 ## Screenshots
 
-| Filtering by category | Spot detail |
-|---|---|
-| ![Filters](docs/img/filters.png) | ![Detail](docs/img/detail.png) |
+![Filtering by category](docs/img/filters.png)
 
-<details>
-<summary>Settings</summary>
-
-![Settings](docs/img/settings.png)
-
-</details>
+*Sub-filters are contextual: Movies get Format, Source, Language and Genre; Games get
+Platform, Format and Genre. Every option shows how many spots it would leave.*
 
 ## Run it
 

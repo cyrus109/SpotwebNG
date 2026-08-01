@@ -54,11 +54,7 @@ contract; a response model adds nothing to an `HTMLResponse`. JSON endpoints
 shapes and are covered by tests.
 **Exit condition:** revisit if a JSON API for third parties is added.
 
-## ENGINEERING: coverage gate not yet met
+## ENGINEERING: coverage gate — CLEARED 2026-08-01
 
-**Standard says:** ≥80% in CI.
-**Current state:** 77%, with `app/web.py` (route wiring) the main gap.
-**Why recorded rather than fixed:** the untested lines are largely template-render
-branches better covered by end-to-end checks than by unit tests.
-**Exit condition:** raise route coverage above 80% and drop this entry — the CI gate is
-already set to fail below it, so this waiver documents a known-red gate, not a disabled one.
+Was 77% against an 80% gate. Route-level tests (`tests/test_routes.py`) brought it to 80%
+and the CI gate now passes. Kept here as a record; no exception is in force.

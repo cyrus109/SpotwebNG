@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% block title %}Settings — {{ app_name }}{% endblock %}
+
+{% block rail %}
+<nav class="rail" id="rail" aria-label="Settings sections">
+  <div class="rail-scroll">
+    <div class="rail-sec">
+      <div class="rail-title">Settings</div>
+      <div class="rail-nav">
+        <a href="#all" class="rail-link" data-section="all"><span class="rail-text">All settings</span></a>
+        {% for key, label in [('usenet','Usenet provider'),('retrieval','Retrieval &amp; retention'),
+                              ('display','Display'),('appearance','Appearance'),
+                              ('api','API access'),('account','Your account'),('users','Users')] %}
+        <a href="#{{ key }}" class="rail-link" data-section="{{ key }}"><span class="rail-text">{{ label | safe }}</span></a>
+        {% endfor %}
+      </div>
+    </div>
+    <div class="rail-sec">
+      <div class="rail-title">Library</div>
+      <div class="rail-nav">
+        <a href="/" class="rail-link"><span class="rail-text">← Back to browsing</span></a>
+      </div>
+    </div>
+  </div>
+  <div class="rail-foot">
+    <div class="stat-line">{{ '{:,}'.format(stats.spots) }} spots · {{ stats.images }} images</div>
+    <div class="stat-line">{{ stats.db_size }} on disk</div>
+  </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+{% if saved %}<div class="banner ok">Settings saved.</div>{% endif %}
+
+<div class="settings-wrap">
+
+  <section class="card" id="usenet">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h2>Usenet provider</h2>
+        <p class="card-sub">Where spots are retrieved from. Changes are tested before they are saved.</p>
+      </div>
+      {% if current.provider_host %}<span class="pill" id="connPill" data-state="unknown">Not checked</span>{% endif %}
+    </div>
+    {% if current.provider_host %}
+    <dl class="facts">
+      <div><dt>Host</dt><dd title="{{ current.provider_host }}:{{ current.provider_port }}">{{ current.provider_host }}:{{ current.provider_port }}</dd></div>
+      <div><dt>TLS</dt><dd>{{ 'Yes' if current.provider_ssl == 'yes' else 'No' }}</dd></div>
+      <div><dt>Username</dt><dd title="{{ current.username or '' }}">{{ current.username or '—' }}</dd></div>
+      <div><dt>Connections</dt><dd>{{ current.connections or 4 }}</dd></div>
+    </dl>
+    {% endif %}
+    <div class="card-actions">
+      <a class="btn-glass" href="/setup">Open provider wizard →</a>
+      {% if current.provider_host %}<button class="btn-glass btn-ghost" type="button" id="testConn">Test connection</button>{% endif %}
+    </div>
+  </section>
+
+  <form method="post" action="/settings">
+  <section class="card" id="retrieval">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h2>Retrieval &amp; retention</h2>
+        <p class="card-sub">How often new spots are fetched, and how long they are kept.
+           Without a retention policy the database grows forever.</p>
+      </div>
+    </div>
+    <div class="card-rows">
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="retrieve_interval">Check for new spots</label>
+          <span class="set-desc">Background poll interval.</span>
+        </div>
+        <div class="set-control input-unit">
+          <input type="number" min="5" max="1440" name="retrieve_interval" id="retrieve_interval" value="{{ values.retrieve_interval }}"><span class="unit">minutes</span>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="retrieve_backfill">First-run backfill</label>
+          <span class="set-desc">Articles fetched when the database is empty.</span>
+        </div>
+        <div class="set-control input-unit">
+          <input type="number" min="1000" max="500000" step="1000" name="retrieve_backfill" id="retrieve_backfill" value="{{ values.retrieve_backfill }}"><span class="unit">articles</span>
+        </div>
+      </div>
+      <label class="set-row set-row-toggle">
+        <div class="set-info">
+          <span class="set-name">Background enrichment</span>
+          <span class="set-desc">Fetch covers, descriptions and NZB references in the background.</span>
+        </div>
+        <div class="set-control set-control-end">
+          <input type="hidden" name="auto_enrich__present" value="1">
+          <input type="checkbox" class="switch" name="auto_enrich" {{ 'checked' if values.auto_enrich }}>
+        </div>
+      </label>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="retention_days">Keep spots for</label>
+          <span class="set-desc">0 keeps everything forever.</span>
+        </div>
+        <div class="set-control input-unit">
+          <input type="number" min="0" max="3650" name="retention_days" id="retention_days" value="{{ values.retention_days }}"><span class="unit">days</span>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="retention_type">When spots pass that age</label>
+          <span class="set-desc">What the retention job removes.</span>
+        </div>
+        <div class="set-control">
+          <select name="retention_type" id="retention_type" data-ui-select>
+            <option value="fullonly" {{ 'selected' if values.retention_type == 'fullonly' }}>Keep them listed, drop covers &amp; NZB data</option>
+            <option value="everything" {{ 'selected' if values.retention_type == 'everything' }}>Delete them completely</option>
+          </select>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="display">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h2>Display</h2>
+        <p class="card-sub">How listings look for everyone who opens this app.</p>
+      </div>
+    </div>
+    <div class="card-rows">
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="per_page">Spots per page</label>
+          <span class="set-desc">Page size for lists and search results.</span>
+        </div>
+        <div class="set-control input-unit">
+          <input type="number" min="12" max="500" name="per_page" id="per_page" value="{{ values.per_page }}"><span class="unit">spots</span>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="default_sort">Default sort</label>
+          <span class="set-desc">Order used on a fresh visit.</span>
+        </div>
+        <div class="set-control">
+          <select name="default_sort" id="default_sort" data-ui-select>
+            {% for v, l in [('new','Newest'),('old','Oldest'),('size','Largest'),('title','Title A–Z')] %}
+            <option value="{{ v }}" {{ 'selected' if values.default_sort == v }}>{{ l }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="default_view">Default view</label>
+          <span class="set-desc">Poster grid or a compact table.</span>
+        </div>
+        <div class="set-control">
+          <select name="default_view" id="default_view" data-ui-select>
+            <option value="grid" {{ 'selected' if values.default_view == 'grid' }}>Poster grid</option>
+            <option value="table" {{ 'selected' if values.default_view == 'table' }}>Table</option>
+          </select>
+        </div>
+      </div>
+      <label class="set-row set-row-toggle">
+        <div class="set-info">
+          <span class="set-name">Hide adult content</span>
+          <span class="set-desc">Applies Spotweb's <code>~cat0_z3</code> filter to every listing and API search.</span>
+        </div>
+        <div class="set-control set-control-end">
+          <input type="hidden" name="hide_adult__present" value="1">
+          <input type="checkbox" class="switch" name="hide_adult" {{ 'checked' if values.hide_adult }}>
+        </div>
+      </label>
+    </div>
+  </section>
+
+  <section class="card" id="appearance">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h2>Appearance</h2>
+        <p class="card-sub">Both themes share the same layout, spacing and type scale — only the palette changes.</p>
+      </div>
+    </div>
+    <div class="card-body">
+      <div class="theme-picker">
+        {% for key, name, note in [('liquid-glass','Liquid glass','Indigo base, cyan accent'),
+                                   ('midnight','Studio','Near-black, violet accent, Instrument Sans')] %}
+        <label class="theme-option {{ 'on' if values.theme == key }}">
+          <input type="radio" name="theme" value="{{ key }}" {{ 'checked' if values.theme == key }}>
+          <span class="swatch swatch-{{ key }}"><i></i><i></i><i></i></span>
+          <span class="theme-name">{{ name }}</span>
+          <span class="theme-note">{{ note }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <div class="savebar" id="saveBar" hidden>
+    <span class="savebar-msg">You have unsaved changes.</span>
+    <button class="linkish" type="button" id="discardBtn">Discard</button>
+    <button class="btn-glass btn-primary" type="submit">Save changes</button>
+  </div>
+  </form>
+
+  <section class="card" id="api">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h2>API access</h2>
+        <p class="card-sub">Give each client its own key so you can revoke one without breaking the others.</p>
+      </div>
+    </div>
+    {# One row per key. The secret is masked on screen — Copy carries the full
+       value — so the row never outgrows the card. #}
+    <ul class="keylist">
+      {% for k in api_keys %}
+      <li class="keyrow">
+        <div class="keyrow-main">
+          <span class="keyrow-name">{{ k.name }}</span>
+          <code class="keyrow-key">{{ k.api_key[:8] }}<span class="mask">••••••••</span>{{ k.api_key[-4:] }}</code>
+        </div>
+        <span class="keyrow-used">{{ k.last_used.strftime('%d %b %H:%M') if k.last_used else 'never used' }}</span>
+        <button class="copy-btn" type="button" data-copy="{{ k.api_key }}" title="Copy full key">Copy</button>
+        <form method="post" action="/settings/apikey/delete" onsubmit="return confirm('Revoke {{ k.name }}? Clients using it stop working immediately.')">
+          <input type="hidden" name="key_id" value="{{ k.id }}">
+          <button class="linkish" type="submit">Revoke</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    <form method="post" action="/settings/apikey" class="inline-form">
+      <input type="text" name="name" placeholder="Client name (e.g. Radarr)" required>
+      <button class="btn-glass" type="submit">Create key</button>
+    </form>
+    <div class="hint card-footnote">Newznab URL for clients: <code>{{ base_url }}/api</code></div>
+  </section>
+
+  <section class="card" id="account">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h2>Your account</h2>
+        <p class="card-sub">
+          {% if me %}Signed in as <b>{{ me.display_name or me.username }}</b> ({{ me.role }}).
+          {% else %}This instance has no accounts yet — anyone on your network can open it.{% endif %}
+        </p>
+      </div>
+    </div>
+    {% if me %}
+    <form method="post" action="/settings/account">
+      <div class="card-rows">
+        <div class="set-row">
+          <div class="set-info">
+            <label class="set-name" for="current_password">Current password</label>
+            <span class="set-desc">Required to set a new one.</span>
+          </div>
+          <div class="set-control">
+            <input type="password" name="current_password" id="current_password" autocomplete="current-password">
+          </div>
+        </div>
+        <div class="set-row">
+          <div class="set-info">
+            <label class="set-name" for="password">New password</label>
+            <span class="set-desc">Signs out every session, including this one.</span>
+          </div>
+          <div class="set-control">
+            <input type="password" name="password" id="password" autocomplete="new-password" minlength="8">
+          </div>
+        </div>
+      </div>
+      <div class="card-actions">
+        <button class="btn-glass" type="submit">Change password</button>
+        <button class="btn-glass btn-ghost" type="submit" form="logoutForm">Sign out</button>
+      </div>
+    </form>
+    <form method="post" action="/logout" id="logoutForm" hidden></form>
+    {% else %}
+    <div class="card-actions"><a class="btn-glass btn-primary" href="/setup">Create the administrator →</a></div>
+    {% endif %}
+  </section>
+
+  <section class="card" id="users">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h2>Users</h2>
+        <p class="card-sub">Admins configure this instance. Viewers can only browse and search.</p>
+      </div>
+    </div>
+    <ul class="keylist">
+      {% for u in users %}
+      <li class="keyrow">
+        <div class="keyrow-main">
+          <span class="keyrow-name">{{ u.display_name or u.username }}{% if me and u.id == me.id %} <span class="keyrow-used">(you)</span>{% endif %}</span>
+          <span class="keyrow-used">{{ 'last seen ' ~ u.last_login.strftime('%d %b %H:%M') if u.last_login else 'never signed in' }}</span>
+        </div>
+        <form method="post" action="/settings/users/role" class="role-form">
+          <input type="hidden" name="user_id" value="{{ u.id }}">
+          <select name="role" onchange="this.form.submit()" aria-label="Role for {{ u.username }}">
+            {% for r in roles %}<option value="{{ r }}" {{ 'selected' if u.role == r }}>{{ r }}</option>{% endfor %}
+          </select>
+        </form>
+        <form method="post" action="/settings/users/delete"
+              onsubmit="return confirm('Remove {{ u.username }}? Their sessions end immediately.')">
+          <input type="hidden" name="user_id" value="{{ u.id }}">
+          <button class="linkish" type="submit">Remove</button>
+        </form>
+      </li>
+      {% endfor %}
+    </ul>
+    <form method="post" action="/settings/users" class="inline-form">
+      <input type="text" name="username" placeholder="Username" required autocomplete="off">
+      <input type="password" name="password" placeholder="Password" required minlength="8" autocomplete="new-password">
+      <select name="role" aria-label="Role">
+        {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+      </select>
+      <button class="btn-glass" type="submit">Add user</button>
+    </form>
+    <div class="hint card-footnote">The last administrator cannot be removed or demoted.</div>
+  </section>
+
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="/static/js/settings.js?v={{ asset_v('js/settings.js') }}"></script>{% endblock %}

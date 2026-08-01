@@ -215,3 +215,37 @@ async def test_a_legacy_single_account_becomes_an_admin_user(client):
         assert (await verify_credentials(s, "olduser", "legacy-pw-123")) is not None
         # the legacy rows are cleared so there is one source of truth
         assert await s.get(Setting, "auth_password") is None
+
+
+# --- adult content is an admin-only, safe-by-default control ---------
+
+
+async def test_hiding_adult_content_is_on_by_default(client):
+    """A fresh install must not show adult covers before anyone configures it."""
+    from app.settings_store import load_settings
+
+    _, factory = client
+    async with factory() as s:
+        assert (await load_settings(s))["hide_adult"] is True
+
+
+async def test_only_an_admin_can_reveal_adult_content(client):
+    from app.settings_store import load_settings
+
+    c, factory = client
+    async with factory() as s:
+        await create_user(s, "admin1", "pw-admin-123", ADMIN)
+        await create_user(s, "vic", "pw-viewer-123", VIEWER)
+
+    # a viewer cannot turn the filter off
+    await _login(c, "vic", "pw-viewer-123")
+    await c.post("/settings", data={"hide_adult__present": "1"})
+    async with factory() as s:
+        assert (await load_settings(s))["hide_adult"] is True
+
+    # an admin can
+    await c.post("/logout")
+    await _login(c, "admin1", "pw-admin-123")
+    await c.post("/settings", data={"hide_adult__present": "1"})
+    async with factory() as s:
+        assert (await load_settings(s))["hide_adult"] is False
