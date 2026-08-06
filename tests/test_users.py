@@ -249,3 +249,38 @@ async def test_only_an_admin_can_reveal_adult_content(client):
     await c.post("/settings", data={"hide_adult__present": "1"})
     async with factory() as s:
         assert (await load_settings(s))["hide_adult"] is False
+
+
+async def test_viewer_cannot_turn_off_the_adult_filter(client):
+    """The redirect alone proves nothing — assert the stored value is unchanged."""
+    from app.settings_store import load_settings, save_settings
+
+    c, factory = client
+    async with factory() as s:
+        await create_user(s, "admin1", "pw-admin-123", ADMIN)
+        await create_user(s, "vic", "pw-viewer-123", VIEWER)
+        await save_settings(s, {"hide_adult__present": "1", "hide_adult": "on"})
+    await _login(c, "vic", "pw-viewer-123")
+
+    # Unchecking a checkbox posts only the __present marker.
+    await c.post("/settings", data={"hide_adult__present": "1"}, follow_redirects=False)
+
+    async with factory() as s:
+        assert (await load_settings(s))["hide_adult"] is True, "a viewer disabled the filter"
+
+
+async def test_admin_can_toggle_the_adult_filter_both_ways(client):
+    from app.settings_store import load_settings
+
+    c, factory = client
+    async with factory() as s:
+        await create_user(s, "admin1", "pw-admin-123", ADMIN)
+    await _login(c, "admin1", "pw-admin-123")
+
+    await c.post("/settings", data={"hide_adult__present": "1"})
+    async with factory() as s:
+        assert (await load_settings(s))["hide_adult"] is False
+
+    await c.post("/settings", data={"hide_adult__present": "1", "hide_adult": "on"})
+    async with factory() as s:
+        assert (await load_settings(s))["hide_adult"] is True
