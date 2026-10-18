@@ -5,7 +5,7 @@
 **A modern Spotweb.** Self-hosted Spotnet indexer for Usenet, with a Newznab API
 for Radarr, Sonarr and Prowlarr — and a UI you'll actually want to browse.
 
-[![CI](https://github.com/FornaxMedia/SpotwebNG/actions/workflows/forge-ci.yml/badge.svg)](https://github.com/FornaxMedia/SpotwebNG/actions)
+[![CI](https://github.com/cyrus109/SpotwebNG/actions/workflows/forge-ci.yml/badge.svg)](https://github.com/cyrus109/SpotwebNG/actions)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)](https://www.python.org/)
 [![Docker](https://img.shields.io/badge/docker-ready-2496ED?logo=docker&logoColor=white)](#run-it)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
@@ -48,10 +48,12 @@ Platform, Format and Genre. Every option shows how many spots it would leave.*
 ## Run it
 
 ```bash
-git clone https://github.com/FornaxMedia/SpotwebNG.git
+git clone https://github.com/cyrus109/SpotwebNG.git
 cd SpotwebNG
-docker compose up -d
+docker compose up -d --build
 ```
+
+To update later: `git pull && docker compose up -d --build`. Your data stays in the volume.
 
 Open <http://localhost:7979>. The setup wizard asks for an administrator login first —
 **complete it, because until you do the instance is open to anyone who can reach it** —
@@ -168,11 +170,33 @@ clients want the base URL, others the full `/api`.
   under their real names.
 - **Retention** — keep spots listed while dropping their heavy parts, or delete them
   outright. Without a policy an index grows forever.
-- **Full history** — by default only the most recent articles are fetched on a first run.
-  Turn on *Retrieve the server's full history* in Settings (or press **Full history** on the
-  browse toolbar) to walk back to the oldest spot your provider still keeps. It runs in the
-  background and resumes after a restart. Expect a big database; consider disabling background
-  enrichment first.
+- **Full history** — see below.
+
+## Retrieving the full history
+
+By default a first run only fetches the most recent articles (*First-run backfill*, 20,000
+by default, up to 500,000). To index everything your Usenet provider still keeps — often
+years of spots — either:
+
+- turn on **Retrieve the server's full history** in *Settings → Retrieval & retention*, so
+  the background loop does it automatically, or
+- press **Full history** on the browse toolbar for a one-off run (admins only).
+
+How it works: after fetching new spots, a second pass walks backwards from the oldest article
+already scanned down to the server's oldest article, in 5,000-article chunks. The backfill
+size is ignored while this is on. A bookmark (`spots_floor`) is saved after every chunk, so
+it resumes after a restart and is validated by message-id like the forward bookmark.
+Duplicates are skipped, so it is safe to turn on for an existing install.
+
+Things to know:
+
+- It can take hours and the database grows a lot. Use Postgres for very large histories.
+- While it runs, the plain **Refresh** button answers "already running".
+- Consider turning off *Background enrichment* first; otherwise covers and NZB references are
+  fetched for every spot.
+- If retention is set to delete old spots, the backfill skips spots older than the cutoff.
+- Progress shows in the container log (`docker compose logs -f`) as `floor` in the
+  `spot retrieval:` line, falling towards the server's oldest article.
 
 ## Configuration
 
