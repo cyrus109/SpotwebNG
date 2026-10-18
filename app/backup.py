@@ -18,6 +18,7 @@ import gzip
 import io
 import json
 import os
+import re
 import zlib
 from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
@@ -26,12 +27,20 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from .comments import _MSGID_RE
 from .models import Comment, Spot, UsenetState
+from .spotnet import safe_website
 
 FORMAT = "spotwebng-export"
 VERSION = 1
 CHUNK = 2000
 MAX_LINE = 2 * 1024 * 1024
+MAX_BATCH_CHARS = 32 * 1024 * 1024  # per batch of lines held in memory at once
+MAX_EXPANSION = 100  # decompressed size may not exceed 100x the upload (plus slack)
+_CTRL_ANY = re.compile(r"[\x00-\x1f\x7f]")
+_CTRL_KEEP_NEWLINES = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]")
+_ID_RE = re.compile(r"^<[^\s<>@]+@[^\s<>@]+>$")
+_SEGMENT_RE = re.compile(r"^[^\s<>]{1,255}$")
 # Not exported: ids differ per install, timestamps are regenerated.
 _SKIP = {"id", "created_at", "last_retrieved"}
 TABLES: dict[str, tuple[type, str]] = {
@@ -83,7 +92,7 @@ async def export_chunks(factory: async_sessionmaker[AsyncSession]) -> AsyncItera
         yield out
 
 
-def _coerce_row(model: type, raw: Any) -> dict | None:
+def _coerce_row(name: str, model: type, raw: Any) -> dict | None:
     """Validate one untrusted row against the model's columns; None if unusable."""
     if not isinstance(raw, dict):
         return None
@@ -110,17 +119,61 @@ def _coerce_row(model: type, raw: Any) -> dict | None:
         if not col.nullable and col.default is None and col.server_default is None:
             if col.name not in clean:
                 return None
-    return clean
+    return clean if _sanitize(name, clean) else None
 
 
-def _read_lines(text: io.TextIOBase, n: int) -> list[str]:
+def _sanitize(name: str, row: dict) -> bool:
+    """Apply the same rules retrieval applies, to a row that came from a file.
+    Identifiers end up in NNTP command lines and URLs, so they are re-validated
+    here rather than trusted. False means drop the row."""
+    for key, value in row.items():
+        if isinstance(value, str):
+            # Text columns may keep newlines (descriptions, comment bodies); the rest may not.
+            long_text = key in ("description", "body", "nzb_segments")
+            row[key] = (_CTRL_KEEP_NEWLINES if long_text else _CTRL_ANY).sub("", value)
+    if name == "spots":
+        if not _ID_RE.match(row.get("message_id", "")):
+            return False
+        if row.get("nzb_ref") and not _ID_RE.match(row["nzb_ref"]):
+            row["nzb_ref"] = ""
+        if "website" in row:
+            row["website"] = safe_website(row["website"])
+        poster = row.get("poster_url", "")
+        if poster and not (
+            re.fullmatch(r"/image/\d+", poster)
+            or poster.lower().startswith(("http://", "https://"))
+        ):
+            row["poster_url"] = ""
+        if row.get("nzb_segments"):
+            try:
+                segments = json.loads(row["nzb_segments"])
+                ok = (
+                    isinstance(segments, list)
+                    and len(segments) <= 64
+                    and all(isinstance(s, str) and _SEGMENT_RE.match(s) for s in segments)
+                )
+            except ValueError:
+                ok = False
+            if not ok:
+                row["nzb_segments"] = ""
+    elif name == "comments":
+        if not _MSGID_RE.match(row.get("message_id", "")):
+            return False
+        if not _ID_RE.match(row.get("spot_message_id", "")):
+            return False
+    return True
+
+
+def _read_lines(text: io.TextIOBase, n: int, budget: int = MAX_BATCH_CHARS) -> list[str]:
     lines: list[str] = []
-    while len(lines) < n:
+    used = 0
+    while len(lines) < n and used < budget:
         line = text.readline(MAX_LINE + 1)
         if not line:
             break
         if len(line) > MAX_LINE:
             raise ValueError("export file contains an oversized line")
+        used += len(line)
         lines.append(line)
     return lines
 
@@ -169,6 +222,7 @@ async def import_file(
 
             async with factory() as session:
                 batch: dict[str, list[dict]] = {name: [] for name in TABLES}
+                expanded = 0
                 while True:
                     try:
                         lines = await asyncio.to_thread(_read_lines, text, CHUNK)
@@ -176,6 +230,9 @@ async def import_file(
                         raise ValueError(f"Export file is damaged: {exc}") from exc
                     if not lines:
                         break
+                    expanded += sum(len(x) for x in lines)
+                    if expanded > total * MAX_EXPANSION + 64 * 1024 * 1024:
+                        raise ValueError("Export file expands far beyond its size; refusing it")
                     for line in lines:
                         try:
                             item = json.loads(line)
@@ -184,7 +241,7 @@ async def import_file(
                         except (ValueError, KeyError, TypeError):
                             result["skipped"] += 1
                             continue
-                        row = _coerce_row(model, item.get("r"))
+                        row = _coerce_row(name, model, item.get("r"))
                         if row is None:
                             result["skipped"] += 1
                         else:

@@ -12,6 +12,7 @@ import json
 from datetime import UTC, datetime
 from email.utils import format_datetime
 from xml.etree.ElementTree import Element, SubElement, register_namespace, tostring
+from xml.sax.saxutils import escape
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import Response
@@ -212,8 +213,8 @@ async def newznab(
             f'<!DOCTYPE nzb PUBLIC "-//newzBin//DTD NZB 1.1//EN" '
             f'"http://www.newzbin.com/DTD/nzb/nzb-1.1.dtd">\n'
             f'<nzb xmlns="http://www.newzbin.com/DTD/2003/nzb">\n'
-            f'  <head><meta type="title">{spot.title}</meta>'
-            f'<meta type="messageid">{spot.nzb_ref}</meta></head>\n'
+            f'  <head><meta type="title">{escape(spot.title)}</meta>'
+            f'<meta type="messageid">{escape(spot.nzb_ref)}</meta></head>\n'
             f"</nzb>\n"
         )
         return Response(content=nzb, media_type="application/x-nzb")

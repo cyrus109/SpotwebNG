@@ -175,3 +175,77 @@ async def test_hostile_rows_are_clamped_or_skipped(tmp_path):
         assert len(spot.title) == 512  # clamped to the column length
     finally:
         await engine.dispose()
+
+
+async def test_imported_identifiers_and_urls_are_revalidated(tmp_path):
+    target, engine = await _factory()
+    try:
+        ok = {"posted_at": NOW.isoformat(), "title": "t"}
+        lines = [
+            {"format": "spotwebng-export", "version": 1},
+            # CRLF in a message-id would become an extra NNTP command at BODY/HEAD time
+            {"t": "spots", "r": {**ok, "message_id": "<a@x>\r\nQUIT"}},
+            {
+                "t": "comments",
+                "r": {
+                    "message_id": "<s.1.a@x>\r\nQUIT",
+                    "spot_message_id": "<s@x>",
+                    "posted_at": NOW.isoformat(),
+                },
+            },
+            {
+                "t": "comments",
+                "r": {
+                    "message_id": "<s.1.a@x>",
+                    "spot_message_id": "<s@x> bad",
+                    "posted_at": NOW.isoformat(),
+                },
+            },
+            {
+                "t": "spots",
+                "r": {
+                    **ok,
+                    "message_id": "<good@x>",
+                    "website": "javascript:alert(1)",
+                    "poster_url": "javascript:alert(1)",
+                    "nzb_ref": "<a@x>\nQUIT",
+                    "nzb_segments": json.dumps(["fine@x", "bad\r\nQUIT"]),
+                    "description": "line1\nline2\x00",
+                    "poster": "Mal\x1b[2Jlory",
+                },
+            },
+        ]
+        path = tmp_path / "hostile.gz"
+        path.write_bytes(gzip.compress(("\n".join(json.dumps(x) for x in lines) + "\n").encode()))
+        result = await import_file(target, str(path))
+        assert result["added"] == {"spots": 1}
+        assert await _count(target, Comment) == 0
+        async with target() as s:
+            spot = (await s.execute(select(Spot))).scalar_one()
+        assert spot.website == "" and spot.poster_url == ""
+        assert spot.nzb_ref == "" and spot.nzb_segments == ""
+        assert spot.description == "line1\nline2" and spot.poster == "Mal[2Jlory"
+    finally:
+        await engine.dispose()
+
+
+async def test_a_decompression_bomb_is_refused(tmp_path):
+    target, engine = await _factory()
+    try:
+        filler = json.dumps({"t": "nonsense", "r": {"pad": "A" * 1_000_000}}) + "\n"
+        body = '{"format":"spotwebng-export","version":1}\n' + filler * 400  # ~400 MB expanded
+        path = tmp_path / "bomb.gz"
+        path.write_bytes(gzip.compress(body.encode(), compresslevel=9))
+        with pytest.raises(ValueError, match="expands"):
+            await import_file(target, str(path))
+    finally:
+        await engine.dispose()
+
+
+async def test_nntp_commands_cannot_carry_line_breaks():
+    from app.retriever import NntpClient, NntpError
+
+    client = NntpClient()
+    client.writer = object()  # never reached: the guard fires first
+    with pytest.raises(NntpError):
+        await client.command("BODY <a@x>\r\nQUIT")

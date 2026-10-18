@@ -101,6 +101,8 @@ class NntpClient:
 
     async def command(self, line: str) -> str:
         assert self.writer is not None, "connect() must run first"
+        if "\r" in line or "\n" in line or "\0" in line:
+            raise NntpError("Refusing to send a command containing a line break")
         self.writer.write(line.encode("latin-1") + b"\r\n")
         await self.writer.drain()
         return await self._line()
