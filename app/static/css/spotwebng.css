@@ -842,3 +842,8 @@ a { color: inherit; text-decoration: none; }
 .comment header { display: flex; gap: var(--ds-space-3, .75rem); align-items: center; font-size: var(--ds-text-xs, .75rem); color: var(--ds-text-muted); }
 .comment-body { margin-top: .4rem; white-space: pre-wrap; overflow-wrap: anywhere; }
 .comments .muted { color: var(--ds-text-muted); }
+
+/* retrieval status */
+.status-box { display: grid; gap: var(--ds-space-2, .5rem); margin-bottom: var(--ds-space-4, 1rem); }
+.progress { height: 8px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
+.progress-bar { height: 100%; width: 0; background: var(--ds-accent, #7c9cff); transition: width .4s ease; }

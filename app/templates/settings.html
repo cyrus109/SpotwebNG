@@ -8,7 +8,7 @@
       <div class="rail-title">Settings</div>
       <div class="rail-nav">
         <a href="#all" class="rail-link" data-section="all"><span class="rail-text">All settings</span></a>
-        {% for key, label in [('usenet','Usenet provider'),('retrieval','Retrieval &amp; retention'),
+        {% for key, label in [('usenet','Usenet provider'),('retrieval','Retrieval &amp; retention'),('status','Status &amp; backup'),
                               ('display','Display'),('appearance','Appearance'),
                               ('api','API access'),('account','Your account'),('users','Users')] %}
         <a href="#{{ key }}" class="rail-link" data-section="{{ key }}"><span class="rail-text">{{ label | safe }}</span></a>
@@ -94,6 +94,15 @@
           <input type="checkbox" class="switch" name="retrieve_all" {{ 'checked' if values.retrieve_all }}>
         </div>
       </label>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="retrieve_days">Limit full history to</label>
+          <span class="set-desc">Stop the full history after this many days back, or at your provider's oldest article, whichever comes first. 0 means no day limit.</span>
+        </div>
+        <div class="set-control input-unit">
+          <input type="number" min="0" max="36500" step="1" name="retrieve_days" id="retrieve_days" value="{{ values.retrieve_days }}"><span class="unit">days</span>
+        </div>
+      </div>
       <label class="set-row set-row-toggle">
         <div class="set-info">
           <span class="set-name">Index comments</span>
@@ -230,6 +239,29 @@
     <button class="btn-glass btn-primary" type="submit">Save changes</button>
   </div>
   </form>
+
+  <section class="card" id="status">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h2>Status &amp; backup</h2>
+        <p class="card-sub">Retrieval progress, and a portable copy of your index so a rebuild doesn't mean re-reading Usenet.</p>
+      </div>
+    </div>
+    <div class="status-box" id="retrievalStatus" data-url="/retrieve/status">
+      <div id="rsLine">Checking…</div>
+      <div class="progress" id="rsBarWrap" hidden><div class="progress-bar" id="rsBar"></div></div>
+      <div class="hint" id="rsRange"></div>
+    </div>
+    <div class="card-actions">
+      <a class="btn-glass" href="/settings/export" download>⬇ Export database</a>
+      <input type="file" id="importFile" accept=".gz,application/gzip" aria-label="Export file to import">
+      <button class="btn-glass" type="button" id="importBtn">⬆ Import</button>
+    </div>
+    <div class="hint card-footnote" id="importMsg">
+      Exports hold spots, comments and where retrieval stopped &mdash; never passwords, users or API keys.
+      Importing adds what is missing and never overwrites. Covers are fetched again afterwards.
+    </div>
+  </section>
 
   <section class="card" id="api">
     <div class="card-head">

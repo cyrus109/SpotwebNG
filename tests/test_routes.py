@@ -502,3 +502,55 @@ async def test_comments_of_a_hidden_adult_spot_are_unreachable(with_adult):
     async with factory() as s:
         adult = (await s.execute(select(Spot).where(Spot.message_id == "<xxx@x>"))).scalar_one()
     assert (await c.get(f"/spot/{adult.id}")).status_code == 404
+
+
+# --- status and backup -------------------------------------------------
+
+
+async def test_status_and_export_are_admin_only(client):
+    c, factory = client
+    async with factory() as s:
+        await create_user(s, "boss", "pw-boss-12345", ADMIN)
+        await create_user(s, "view", "pw-view-12345", "viewer")
+    await c.post("/login", data={"username": "view", "password": "pw-view-12345"})
+    for path in ("/retrieve/status", "/settings/export"):
+        assert (await c.get(path)).status_code in (303, 307)  # sent away, no data
+    await c.post("/logout")
+    await c.post("/login", data={"username": "boss", "password": "pw-boss-12345"})
+    body = (await c.get("/retrieve/status")).json()
+    assert body["live"]["running"] is False and "status" in body
+    export = await c.get("/settings/export")
+    assert export.status_code == 200
+    assert "attachment" in export.headers["content-disposition"]
+    import gzip
+
+    text = gzip.decompress(export.content).decode()
+    assert '"spotwebng-export"' in text and "usenet-pw" not in text
+    assert (await c.get("/settings")).text.count("Status &amp; backup") >= 1
+
+
+async def test_import_route_runs_in_the_background_and_reports(client):
+    import asyncio
+
+    c, factory = client
+    await _admin(c, factory)
+    exported = (await c.get("/settings/export")).content
+    resp = await c.post(
+        "/settings/import", files={"file": ("backup.jsonl.gz", exported, "application/gzip")}
+    )
+    assert resp.json() == {"ok": True, "started": True}
+    for _ in range(100):
+        status = (await c.get("/retrieve/status")).json()["status"]
+        if "last_import" in status:
+            break
+        await asyncio.sleep(0.05)
+    assert status["last_import"]["ok"] is True
+    assert status["last_import"]["added"] == {}  # everything was already here
+    bad = await c.post("/settings/import", files={"file": ("x.gz", b"junk", "application/gzip")})
+    assert bad.json()["ok"] is True  # accepted, then reported as failed
+    for _ in range(100):
+        status = (await c.get("/retrieve/status")).json()["status"]
+        if status["last_import"].get("ok") is False:
+            break
+        await asyncio.sleep(0.05)
+    assert status["last_import"]["ok"] is False

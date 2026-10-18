@@ -63,6 +63,7 @@ async def _retrieve_loop() -> None:
                         max_backfill=prefs["retrieve_backfill"],
                         retrieve_all=prefs["retrieve_all"],
                         min_posted=retention_cutoff(prefs),
+                        max_age_days=prefs["retrieve_days"],
                     )
                     logger.info("spot retrieval: %s", result)
                     if prefs["retrieve_comments"]:
@@ -74,6 +75,7 @@ async def _retrieve_loop() -> None:
                                 max_backfill=prefs["retrieve_backfill"],
                                 retrieve_all=prefs["retrieve_all"],
                                 min_posted=retention_cutoff(prefs),
+                                max_age_days=prefs["retrieve_days"],
                             )
                             logger.info("comment retrieval: %s", cresult)
                         except Exception:

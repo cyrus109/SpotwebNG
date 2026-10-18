@@ -197,3 +197,21 @@ async def test_the_comments_bookmark_survives_between_runs(db):
 async def _count(db):
     async with db() as session:
         return (await session.execute(select(func.count()).select_from(Comment))).scalar_one()
+
+
+async def test_an_oversized_body_is_cut_off_while_reading(db):
+    from app.comments import MAX_BODY_WIRE
+
+    huge = (b"y" * 900 + b"\r\n") * (MAX_BODY_WIRE // 900 + 50)
+    articles = {1: _line(1, "<s1.1.a.b@spot.example>")}
+    server = CommentServer(articles, {"<s1.1.a.b@spot.example>": huge})
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            await retrieve_comments(session, "free.usenet", 100)
+            assert await fetch_comment_bodies(session, "<s1@spot.example>") == 0
+            c = (await session.execute(select(Comment))).scalar_one()
+        assert c.body == "" and c.body_state == 2
+    finally:
+        await server.stop()

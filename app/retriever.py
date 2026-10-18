@@ -12,13 +12,16 @@ from __future__ import annotations
 import asyncio
 import json
 import ssl as ssl_module
-from datetime import datetime
+import time
+from datetime import UTC, datetime, timedelta
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Setting, Spot, UsenetState
+from .progress import history_percent, live_idle, live_set, load_status, save_status
 from .spotnet import decode_spot_binary, parse_full_xml, parse_xover_row, safe_website
 
 
@@ -55,6 +58,11 @@ XOVER_FIELDS = (
 
 class NntpError(Exception):
     pass
+
+
+class NntpTooLarge(NntpError):
+    """A multiline reply exceeded its byte budget. The rest of it is still on
+    the wire, so the connection must be closed, not reused."""
 
 
 class NntpClient:
@@ -97,15 +105,19 @@ class NntpClient:
         await self.writer.drain()
         return await self._line()
 
-    async def multiline(self, cmd: str, expect: str) -> list[str]:
+    async def multiline(self, cmd: str, expect: str, max_bytes: int | None = None) -> list[str]:
         reply = await self.command(cmd)
         if not reply.startswith(expect):
             raise NntpError(f"{cmd.split(' ')[0]} failed: {reply}")
         lines: list[str] = []
+        total = 0
         while True:
             line = await self._line()
             if line == ".":
                 return lines
+            total += len(line) + 2
+            if max_bytes is not None and total > max_bytes:
+                raise NntpTooLarge(f"{cmd.split(' ')[0]} reply larger than {max_bytes} bytes")
             lines.append(line[1:] if line.startswith("..") else line)
 
     async def group(self, name: str) -> tuple[int, int, int]:
@@ -155,6 +167,33 @@ async def _load_provider(session: AsyncSession) -> dict:
     if not settings.get("provider_host"):
         raise ValueError("No Usenet provider configured — complete the setup wizard first")
     return settings
+
+
+def row_date(row: dict) -> datetime | None:
+    """The Date header of an XOVER row as an aware UTC datetime, if it parses."""
+    try:
+        parsed = parsedate_to_datetime(str(row["Date"]))
+    except (KeyError, TypeError, ValueError):
+        return None
+    return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)).astimezone(UTC)
+
+
+async def _note_group(session: AsyncSession, client: NntpClient, first: int, last: int) -> None:
+    """Remember the server's article range and the date of its oldest article
+    (looked up once per change of `first`)."""
+    status = await load_status(session)
+    oldest = status.get("oldest_date")
+    if status.get("group_first") != first or not oldest:
+        try:
+            for row in await client.xover(first, min(first + 199, last)):
+                found = row_date(row)
+                if found:
+                    oldest = found.isoformat()
+                    break
+        except (NntpError, OSError, TimeoutError):
+            pass
+    await save_status(session, group_first=first, group_last=last, oldest_date=oldest)
+    await session.commit()
 
 
 async def _store_rows(
@@ -240,13 +279,19 @@ async def retrieve_spots(
     max_backfill: int = DEFAULT_BACKFILL,
     retrieve_all: bool = False,
     min_posted: datetime | None = None,
+    max_age_days: int = 0,
 ) -> dict:
     """Fetch new spot headers and store them. Returns a summary dict.
 
     With `retrieve_all`, a second pass walks backwards from the lowest article
-    already scanned down to the server's oldest article (its retention limit).
-    That pass is resumable: the `spots_floor` bookmark moves with every chunk.
+    already scanned down to the server's oldest article (its retention limit),
+    or, when `max_age_days` is set, until the walk is that many days deep —
+    whichever comes first. The pass is resumable: the `spots_floor` bookmark
+    moves with every chunk.
     """
+    age_cutoff = datetime.now(UTC) - timedelta(days=max_age_days) if max_age_days else None
+    if age_cutoff and (min_posted is None or age_cutoff > min_posted):
+        min_posted = age_cutoff  # rows older than the limit aren't wanted either
     provider = await _load_provider(session)
     client = NntpClient()
     await client.connect(
@@ -258,6 +303,14 @@ async def retrieve_spots(
     )
     try:
         _, first, last = await client.group(HDR_GROUP)
+        live_set(
+            running=True,
+            phase="Fetching new spots",
+            detail="",
+            percent=None,
+            started=time.time(),
+        )
+        await _note_group(session, client, first, last)
 
         state = await session.get(UsenetState, "spots")
         start = max(first, last - max_backfill)
@@ -277,6 +330,7 @@ async def retrieve_spots(
             if msgid != floor.cur_message_id:
                 # group was renumbered: the floor is meaningless, reseed below
                 floor.cur_article, floor.cur_message_id = 0, ""
+                await save_status(session, days_reached_for=0)
         if floor is None or not floor.cur_article:
             # Everything below `start` is unscanned, everything from it up is
             # about to be. (An existing install re-scans a little: dedupe
@@ -302,12 +356,16 @@ async def retrieve_spots(
                 start = rows[-1]["Number"] + 1
             else:
                 start = end + 1
+            live_set(detail=f"{added:,} new spots so far")
             await session.commit()
 
         # Backward pass: [target, floor) in descending chunks.
         target = first if retrieve_all else max(first, last - max_backfill)
         back_scanned = 0
-        while floor.cur_article > target:
+        days_reached = (await load_status(session)).get("days_reached_for") == max_age_days
+        if not (retrieve_all and age_cutoff):
+            days_reached = False
+        while floor.cur_article > target and not days_reached:
             hi = floor.cur_article - 1
             lo = max(target, hi - INCREMENT + 1)
             # A misbehaving server may answer outside the range; trusting it
@@ -319,15 +377,37 @@ async def retrieve_spots(
             a, i, b = await _store_rows(session, rows, min_posted)
             added, invalid, backfilled = added + a, invalid + i, backfilled + b
 
+            floor_date = None
             if rows:
                 lowest = min(rows, key=lambda r: r["Number"])
                 floor.cur_article = lowest["Number"]
                 floor.cur_message_id = lowest.get("Message-ID", "").strip()
+                floor_date = row_date(lowest)
             else:
                 floor.cur_article = lo
                 floor.cur_message_id = ""
+            fields: dict = {"floor": floor.cur_article}
+            if age_cutoff and rows:
+                # Judge the chunk by its newest row (clamped to now): one bogus
+                # ancient date must not end the walk early, a bogus future one
+                # only makes it walk further than needed.
+                newest = max(min(d, datetime.now(UTC)) for d in map(row_date, rows) if d)
+                if newest < age_cutoff:
+                    days_reached = True
+                    fields["days_reached_for"] = max_age_days
+            if floor_date:
+                fields["floor_date"] = floor_date.isoformat()
+            await save_status(session, **fields)
+            status = await load_status(session)
+            live_set(
+                phase="Walking back through history",
+                percent=history_percent(status),
+                detail=f"{added:,} older spots added",
+            )
             await session.commit()
 
+        await save_status(session, floor=floor.cur_article, last_run=datetime.now(UTC).isoformat())
+        await session.commit()
         return {
             "added": added,
             "backfilled": backfilled,
@@ -339,6 +419,7 @@ async def retrieve_spots(
             "group_last": last,
         }
     finally:
+        live_idle()
         await client.quit()
 
 

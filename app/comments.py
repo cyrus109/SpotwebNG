@@ -13,16 +13,19 @@ control characters stripped, size capped).
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Comment, UsenetState
-from .retriever import INCREMENT, NntpClient, NntpError, _load_provider
+from .retriever import INCREMENT, NntpClient, NntpError, NntpTooLarge, _load_provider
 
-MAX_BODY = 10 * 1024  # Spotweb truncates the same way: some "comments" are mis-posted NZBs
+MAX_BODY = 10 * 1024
+MAX_BODY_WIRE = (
+    256 * 1024
+)  # read budget; anything bigger is not a comment  # Spotweb truncates the same way: some "comments" are mis-posted NZBs
 MAX_POSTER = 80
 GROUP_RE = re.compile(r"^[A-Za-z0-9._+-]{1,128}$")  # goes into a GROUP command line
 _MSGID_RE = re.compile(r"^<([^\s<>@]+)@([^\s<>@]+)>$")
@@ -64,9 +67,13 @@ async def retrieve_comments(
     max_backfill: int,
     retrieve_all: bool = False,
     min_posted: datetime | None = None,
+    max_age_days: int = 0,
 ) -> dict:
     """Fetch new comment headers. Forward only: the first run starts `max_backfill`
     articles back (or at the group's first article with `retrieve_all`)."""
+    if retrieve_all and max_age_days:  # same day limit as the spot history
+        age_cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
+        min_posted = age_cutoff if min_posted is None else max(min_posted, age_cutoff)
     if not GROUP_RE.match(group):
         raise ValueError(f"Invalid comments group name: {group!r}")
     provider = await _load_provider(session)
@@ -163,7 +170,13 @@ async def fetch_comment_bodies(session: AsyncSession, spot_message_id: str, limi
     try:
         for comment in pending:
             try:
-                lines = await client.multiline(f"BODY {comment.message_id}", "222")
+                lines = await client.multiline(
+                    f"BODY {comment.message_id}", "222", max_bytes=MAX_BODY_WIRE
+                )
+            except NntpTooLarge:
+                comment.body_state = 2  # a mis-posted binary; the stream is desynced, stop here
+                await session.commit()
+                break
             except NntpError:
                 comment.body_state = 2  # gone from the server: don't ask again
                 await session.commit()

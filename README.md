@@ -170,6 +170,11 @@ clients want the base URL, others the full `/api`.
   under their real names.
 - **Retention** — keep spots listed while dropping their heavy parts, or delete them
   outright. Without a policy an index grows forever.
+- **Comments** — read-only. Comment headers are indexed from the comments newsgroup
+  (*Settings → Index comments*; the group name is configurable, default `free.usenet`) and
+  linked to their spot through their own message-id. The text of a comment loads the first
+  time you open the spot. Comment text is untrusted: it is escaped, size-capped and shown as
+  *unverified*, because Spotnet signatures are not checked yet.
 - **Full history** — see below.
 
 ## Retrieving the full history
@@ -188,6 +193,10 @@ size is ignored while this is on. A bookmark (`spots_floor`) is saved after ever
 it resumes after a restart and is validated by message-id like the forward bookmark.
 Duplicates are skipped, so it is safe to turn on for an existing install.
 
+Limit it by age: set *Limit full history to* N days and the walk ends at N days back
+or at your provider's oldest article, whichever comes first (0 = no day limit). Raising the
+limit later resumes the walk where it stopped.
+
 Things to know:
 
 - It can take hours and the database grows a lot. Use Postgres for very large histories.
@@ -195,8 +204,20 @@ Things to know:
 - Consider turning off *Background enrichment* first; otherwise covers and NZB references are
   fetched for every spot.
 - If retention is set to delete old spots, the backfill skips spots older than the cutoff.
-- Progress shows in the container log (`docker compose logs -f`) as `floor` in the
-  `spot retrieval:` line, falling towards the server's oldest article.
+
+## Progress and backup
+
+*Settings → Status & backup* shows what the retriever is doing right now with a progress bar
+(also a small pill on the browse toolbar while it runs), the date of your provider's oldest
+article, how far back the walk has reached, and where a day limit would stop it. The
+provider's oldest date is learned during the first retrieval.
+
+**Export database** downloads a gzip'd JSON Lines file with spots, comments and the
+retrieval bookmarks, so a rebuilt install can **Import** it instead of re-reading Usenet.
+Passwords, users, sessions and API keys are never exported. Import is additive: rows that
+already exist are skipped, nothing is overwritten, and bookmarks are only taken when the
+install has none. Cover images are not part of the file; spots that had one are fetched
+again in the background. Both are admin-only.
 
 ## Configuration
 
@@ -215,7 +236,7 @@ the volume.
 ## Status
 
 Working today: retrieval, enrichment, filtering, the Newznab API, accounts and retention.
-Not yet: comments and reports groups, saved filters, per-user watchlists.
+Not yet: posting comments, signature verification, reports groups, saved filters, per-user watchlists.
 
 Contributions welcome. Tests run with `pytest`; `ruff` and `mypy` gate every commit.
 

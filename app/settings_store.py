@@ -23,6 +23,7 @@ SPEC: dict[str, tuple[Any, str]] = {
     "retrieve_comments": (True, "bool"),  # index comment headers (bodies load on view)
     "comment_group": ("free.usenet", "str"),  # newsgroup Spotnet comments are posted to
     "retrieve_all": (False, "bool"),  # walk back to the server's oldest article
+    "retrieve_days": (0, "int"),  # ...or only this many days back (0 = no limit)
     "auto_enrich": (True, "bool"),  # fetch images/NZB refs in the background
     # retention
     "retention_days": (0, "int"),  # 0 = keep forever
@@ -45,6 +46,7 @@ CLAMPS = {
     "retrieve_interval": (5, 1440),
     "retrieve_backfill": (1000, 500_000),
     "retention_days": (0, 3650),
+    "retrieve_days": (0, 36500),
 }
 
 CHOICES = {

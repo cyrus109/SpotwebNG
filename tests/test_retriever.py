@@ -515,3 +515,78 @@ async def test_backward_pass_ends_even_if_the_server_ignores_the_range(db, monke
         assert result["floor"] == 100
     finally:
         await server.stop()
+
+
+# ---------- day limit and progress status ----------
+
+
+def _dated_line(n: int, days_ago: int, now) -> str:
+    from datetime import timedelta
+    from email.utils import format_datetime
+
+    stamp = format_datetime(now - timedelta(days=days_ago))
+    return _xover_line(n).replace("Fri, 24 Jul 2026 10:00:00 +0200", stamp)
+
+
+async def test_full_history_stops_at_the_day_limit_and_stays_stopped(db, monkeypatch):
+    from datetime import datetime
+
+    from app.progress import load_status
+
+    monkeypatch.setattr("app.retriever.INCREMENT", 10)
+    now = datetime.now(UTC)
+    # article n is (199 - n) days old: 100 is 99 days old, 199 is today
+    server = FakeNewsServer(
+        first=100, articles={n: _dated_line(n, 199 - n, now) for n in range(100, 200)}
+    )
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            result = await retrieve_spots(
+                session, max_backfill=10, retrieve_all=True, max_age_days=30
+            )
+        assert result["floor"] == 159  # stopped well before the server's oldest article (100)
+        assert await _count(db) == 30  # nothing older than 30 days was stored
+        async with db() as session:
+            oldest = (await session.execute(select(func.min(Spot.posted_at)))).scalar_one()
+            status = await load_status(session)
+        assert (now - oldest.replace(tzinfo=UTC)).days <= 30
+        assert status["days_reached_for"] == 30
+
+        async with db() as session:  # the next cycle does not re-walk
+            again = await retrieve_spots(
+                session, max_backfill=10, retrieve_all=True, max_age_days=30
+            )
+        assert again["backward_scanned"] == 0
+
+        async with db() as session:  # raising the limit resumes the walk
+            more = await retrieve_spots(
+                session, max_backfill=10, retrieve_all=True, max_age_days=60
+            )
+        assert more["backward_scanned"] > 0 and more["floor"] < 159
+    finally:
+        await server.stop()
+
+
+async def test_the_server_range_and_oldest_date_are_remembered(db):
+    from datetime import datetime
+
+    from app.progress import history_percent, load_status
+
+    now = datetime.now(UTC)
+    server = FakeNewsServer(
+        first=100, articles={n: _dated_line(n, 199 - n, now) for n in range(100, 200)}
+    )
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            await retrieve_spots(session, max_backfill=10, retrieve_all=True)
+            status = await load_status(session)
+        assert status["group_first"] == 100 and status["group_last"] == 199
+        oldest = datetime.fromisoformat(status["oldest_date"])
+        assert 98 <= (now - oldest).days <= 100
+        assert history_percent(status) == 100.0  # reached the server's first article
+    finally:
+        await server.stop()

@@ -5,20 +5,24 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import secrets
+import shutil
+import tempfile
 from datetime import UTC, datetime, timedelta
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, File, Form, Query, Request, UploadFile
 from fastapi.responses import (
     FileResponse,
     HTMLResponse,
     JSONResponse,
     RedirectResponse,
     Response,
+    StreamingResponse,
 )
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .auth import (
     ADMIN,
@@ -40,6 +44,7 @@ from .auth import (
     user_for_session,
     verify_credentials,
 )
+from .backup import export_chunks, import_file
 from .categories import CATEGORY_NAMES
 from .comments import comment_counts, fetch_comment_bodies
 from .config import BASE_DIR, IMAGES_DIR, get_settings, load_providers
@@ -54,6 +59,7 @@ from .filters import (
 )
 from .models import ApiUser, Comment, Setting, Spot, User
 from .nntp_check import check_nntp
+from .progress import LIVE, history_percent, live_idle, live_set, load_status, save_status
 from .retention import retention_cutoff
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
 from .settings_store import load_settings, save_settings
@@ -275,6 +281,7 @@ async def _full_history_run() -> None:
                 max_backfill=prefs["retrieve_backfill"],
                 retrieve_all=True,
                 min_posted=retention_cutoff(prefs),
+                max_age_days=prefs["retrieve_days"],
             )
         logging.getLogger("spotwebng").info("full-history retrieval: %s", result)
     except Exception:
@@ -307,6 +314,92 @@ async def retrieve_now(
                 {"ok": False, "message": f"Retrieval failed: {exc}"}, status_code=502
             )
     return JSONResponse({"ok": True, **result})
+
+
+@router.get("/retrieve/status")
+async def retrieve_status(session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """What is running now, plus what we know about the server's history."""
+    status = await load_status(session)
+    prefs = await load_settings(session)
+    oldest = status.get("oldest_date")
+    if prefs["retrieve_days"] and oldest:
+        # What a full retrieval will actually reach: the later of the server's
+        # oldest article and the day limit.
+        limit = (datetime.now(UTC) - timedelta(days=prefs["retrieve_days"])).isoformat()
+        oldest = max(oldest, limit)
+    return JSONResponse(
+        {
+            "live": LIVE,
+            "status": status,
+            "history_percent": history_percent(status),
+            "effective_oldest": oldest,
+            "retrieve_days": prefs["retrieve_days"],
+        }
+    )
+
+
+@router.get("/settings/export")
+async def export_database(session: AsyncSession = Depends(get_session)) -> StreamingResponse:
+    """Download the index (spots, comments, bookmarks) as a gzip'd JSON Lines file."""
+    # The generator opens its own sessions: the request's one is closed by the time
+    # a long stream finishes.
+    factory = async_sessionmaker(session.bind, expire_on_commit=False)
+    stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M")
+    return StreamingResponse(
+        export_chunks(factory),
+        media_type="application/gzip",
+        headers={"Content-Disposition": f'attachment; filename="spotwebng-{stamp}.jsonl.gz"'},
+    )
+
+
+async def _import_run(factory, path: str) -> None:
+    log = logging.getLogger("spotwebng")
+    try:
+        async with RETRIEVE_LOCK:
+            live_set(running=True, phase="Importing database", detail="", percent=0.0)
+            try:
+                result = await import_file(
+                    factory, path, on_progress=lambda pct, msg: live_set(percent=pct, detail=msg)
+                )
+                outcome = {"ok": True, **result}
+            except ValueError as exc:
+                outcome = {"ok": False, "error": str(exc)}
+            except Exception:
+                log.exception("database import failed")
+                outcome = {"ok": False, "error": "Import failed; see the server log"}
+            finally:
+                live_idle()
+            async with factory() as session:
+                await save_status(
+                    session, last_import={**outcome, "at": datetime.now(UTC).isoformat()}
+                )
+                await session.commit()
+        log.info("database import: %s", outcome)
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+@router.post("/settings/import")
+async def import_database(
+    file: UploadFile = File(...), session: AsyncSession = Depends(get_session)
+) -> JSONResponse:
+    """Merge an export file into this install, in the background."""
+    if RETRIEVE_LOCK.locked():
+        return JSONResponse({"ok": False, "message": "A retrieval is running; try later"}, 409)
+    from .config import SPOT_DATA_DIR
+
+    SPOT_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    fd, path = tempfile.mkstemp(prefix="import-", suffix=".gz", dir=SPOT_DATA_DIR)
+    with os.fdopen(fd, "wb") as out:
+        await asyncio.to_thread(shutil.copyfileobj, file.file, out)
+    factory = async_sessionmaker(session.bind, expire_on_commit=False)
+    task = asyncio.create_task(_import_run(factory, path))
+    _background.add(task)
+    task.add_done_callback(_background.discard)
+    return JSONResponse({"ok": True, "started": True})
 
 
 @router.post("/setup/apikey")
