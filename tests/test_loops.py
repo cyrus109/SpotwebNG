@@ -29,7 +29,14 @@ def no_real_database(monkeypatch):
 
 
 async def _fake_settings(session):
-    return {"retrieve_interval": 1, "retrieve_backfill": 100, "auto_enrich": True}
+    return {
+        "retrieve_interval": 1,
+        "retrieve_backfill": 100,
+        "retrieve_all": False,
+        "retention_days": 0,
+        "retention_type": "fullonly",
+        "auto_enrich": True,
+    }
 
 
 async def _noop(session, *args, **kwargs):

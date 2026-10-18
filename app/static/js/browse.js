@@ -44,15 +44,21 @@
 })();
 
 // Manual spot retrieval from the toolbar.
-window.refreshSpots = async function () {
-  const btn = document.getElementById("btn-refresh");
+window.refreshSpots = async function (full) {
+  if (full && !confirm("Fetch the provider's entire spot history in the background? This can take hours and grow the database a lot.")) return;
+  const btn = document.getElementById(full ? "btn-full" : "btn-refresh");
   const original = btn.textContent;
   btn.disabled = true;
   btn.textContent = "⟳ Fetching…";
   try {
-    const resp = await fetch("/retrieve", { method: "POST" });
+    const resp = await fetch("/retrieve", {
+      method: "POST",
+      body: full ? new URLSearchParams({ full: "1" }) : undefined,
+    });
     const r = await resp.json();
-    if (r.ok) {
+    if (r.ok && r.started) {
+      btn.textContent = "✓ Started — see the log";
+    } else if (r.ok) {
       btn.textContent = "✓ +" + r.added + " new";
       setTimeout(() => location.reload(), 900);
     } else {

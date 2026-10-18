@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import secrets
 from datetime import UTC, datetime, timedelta
 
@@ -40,7 +42,7 @@ from .auth import (
 )
 from .categories import CATEGORY_NAMES
 from .config import BASE_DIR, IMAGES_DIR, get_settings, load_providers
-from .db import get_session
+from .db import SessionLocal, get_session
 from .facets import option_counts, section_counts, section_dimensions
 from .filters import (
     FILTER_SECTIONS,
@@ -51,6 +53,7 @@ from .filters import (
 )
 from .models import ApiUser, Setting, Spot, User
 from .nntp_check import check_nntp
+from .retention import retention_cutoff
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
 from .settings_store import load_settings, save_settings
 from .spots import get_spot, is_adult_spot, search_spots
@@ -241,16 +244,43 @@ async def setup_form(
     )
 
 
+_background: set[asyncio.Task] = set()  # keep references so tasks aren't garbage-collected
+
+
+async def _full_history_run() -> None:
+    try:
+        async with RETRIEVE_LOCK, SessionLocal() as session:
+            prefs = await load_settings(session)
+            result = await retrieve_spots(
+                session,
+                max_backfill=prefs["retrieve_backfill"],
+                retrieve_all=True,
+                min_posted=retention_cutoff(prefs),
+            )
+        logging.getLogger("spotwebng").info("full-history retrieval: %s", result)
+    except Exception:
+        logging.getLogger("spotwebng").exception("full-history retrieval failed")
+
+
 @router.post("/retrieve")
-async def retrieve_now(session: AsyncSession = Depends(get_session)) -> JSONResponse:
-    """Manually fetch new spots from the configured provider."""
+async def retrieve_now(
+    full: str = Form(""), session: AsyncSession = Depends(get_session)
+) -> JSONResponse:
+    """Manually fetch new spots. `full=1` walks back to the server's oldest
+    article in the background (it can take hours); otherwise a quick refresh."""
     if RETRIEVE_LOCK.locked():
         return JSONResponse(
             {"ok": False, "message": "A retrieval is already running"}, status_code=409
         )
+    prefs = await load_settings(session)
+    if full == "1":
+        task = asyncio.create_task(_full_history_run())
+        _background.add(task)
+        task.add_done_callback(_background.discard)
+        return JSONResponse({"ok": True, "started": True, "added": 0})
     async with RETRIEVE_LOCK:
         try:
-            result = await retrieve_spots(session)
+            result = await retrieve_spots(session, max_backfill=prefs["retrieve_backfill"])
         except ValueError as exc:
             return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
         except Exception as exc:

@@ -19,6 +19,7 @@ SPEC: dict[str, tuple[Any, str]] = {
     # retrieval
     "retrieve_interval": (15, "int"),  # minutes between automatic runs
     "retrieve_backfill": (20000, "int"),  # articles to scan on a first run
+    "retrieve_all": (False, "bool"),  # walk back to the server's oldest article
     "auto_enrich": (True, "bool"),  # fetch images/NZB refs in the background
     # retention
     "retention_days": (0, "int"),  # 0 = keep forever

@@ -157,3 +157,11 @@ async def test_theme_defaults_and_choices(session):
     # an unknown theme must not reach the html attribute
     await save_settings(session, {"theme": "<script>"})
     assert (await load_settings(session))["theme"] == "liquid-glass"
+
+
+def test_retrieve_all_defaults_off_and_coerces():
+    from app.settings_store import DEFAULTS, _coerce
+
+    assert DEFAULTS["retrieve_all"] is False
+    assert _coerce("retrieve_all", "on") is True
+    assert _coerce("retrieve_all", "garbage") is False

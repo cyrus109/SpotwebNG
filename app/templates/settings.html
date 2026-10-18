@@ -86,6 +86,16 @@
       </div>
       <label class="set-row set-row-toggle">
         <div class="set-info">
+          <span class="set-name">Retrieve the server's full history</span>
+          <span class="set-desc">Walk back to the oldest spot your provider still keeps (can be years and millions of spots). Runs in the background and resumes after a restart; ignores the backfill size above. Consider turning off background enrichment first.</span>
+        </div>
+        <div class="set-control set-control-end">
+          <input type="hidden" name="retrieve_all__present" value="1">
+          <input type="checkbox" class="switch" name="retrieve_all" {{ 'checked' if values.retrieve_all }}>
+        </div>
+      </label>
+      <label class="set-row set-row-toggle">
+        <div class="set-info">
           <span class="set-name">Background enrichment</span>
           <span class="set-desc">Fetch covers, descriptions and NZB references in the background.</span>
         </div>

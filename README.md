@@ -168,6 +168,11 @@ clients want the base URL, others the full `/api`.
   under their real names.
 - **Retention** — keep spots listed while dropping their heavy parts, or delete them
   outright. Without a policy an index grows forever.
+- **Full history** — by default only the most recent articles are fetched on a first run.
+  Turn on *Retrieve the server's full history* in Settings (or press **Full history** on the
+  browse toolbar) to walk back to the oldest spot your provider still keeps. It runs in the
+  background and resumes after a restart. Expect a big database; consider disabling background
+  enrichment first.
 
 ## Configuration
 

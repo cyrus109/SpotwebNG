@@ -38,6 +38,13 @@ def _remove_artifacts(spot_id: int) -> None:
             pass
 
 
+def retention_cutoff(settings: dict, now: datetime | None = None) -> datetime | None:
+    """Oldest `posted_at` that survives pruning; None when nothing is deleted."""
+    if settings["retention_days"] and settings["retention_type"] == "everything":
+        return (now or datetime.now(UTC)) - timedelta(days=settings["retention_days"])
+    return None
+
+
 async def prune_old_spots(session: AsyncSession, now: datetime | None = None) -> dict:
     """Apply the configured retention policy. Safe to run repeatedly."""
     settings = await load_settings(session)

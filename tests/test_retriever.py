@@ -385,3 +385,109 @@ async def test_rescan_backfills_subcats_without_touching_enrichment(db):
             assert spot.poster_url == "/image/1"
     finally:
         await server.stop()
+
+
+# ---------- full-history backfill (retrieve_all) ----------
+
+
+async def _count(db) -> int:
+    async with db() as session:
+        return (await session.execute(select(func.count()).select_from(Spot))).scalar_one()
+
+
+def _history(n: int = 100) -> FakeNewsServer:
+    return FakeNewsServer(first=100, articles={i: _xover_line(i) for i in range(100, 100 + n)})
+
+
+async def test_without_retrieve_all_old_articles_stay_unfetched(db):
+    server = _history()
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            result = await retrieve_spots(session, max_backfill=10)
+        assert result["added"] == 11
+        assert result["backward_scanned"] == 0
+    finally:
+        await server.stop()
+
+
+async def test_retrieve_all_walks_back_to_the_servers_oldest_article(db, monkeypatch):
+    monkeypatch.setattr("app.retriever.INCREMENT", 10)  # force several backward chunks
+    server = _history()
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            await retrieve_spots(session, max_backfill=10)  # an existing, shallow install
+        assert await _count(db) == 11
+
+        async with db() as session:
+            result = await retrieve_spots(session, max_backfill=10, retrieve_all=True)
+        assert await _count(db) == 100  # nothing duplicated, nothing missed
+        assert result["floor"] == 100
+
+        async with db() as session:  # converged: nothing left to walk
+            again = await retrieve_spots(session, max_backfill=10, retrieve_all=True)
+        assert again["added"] == 0
+        assert again["backward_scanned"] == 0
+    finally:
+        await server.stop()
+
+
+async def test_retrieve_all_on_a_fresh_install_gets_everything(db):
+    server = _history()
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            await retrieve_spots(session, max_backfill=10, retrieve_all=True)
+        assert await _count(db) == 100
+    finally:
+        await server.stop()
+
+
+async def test_a_renumbered_floor_is_reseeded_not_trusted(db):
+    server = _history()
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            await retrieve_spots(session, max_backfill=10)
+        async with db() as session:
+            floor = await session.get(UsenetState, "spots_floor")
+            floor.cur_article, floor.cur_message_id = 50, "<not-there@x>"
+            await session.commit()
+        async with db() as session:
+            await retrieve_spots(session, max_backfill=10, retrieve_all=True)
+        assert await _count(db) == 100
+    finally:
+        await server.stop()
+
+
+async def test_backfill_skips_spots_older_than_the_retention_cutoff(db):
+    from datetime import datetime
+
+    server = _history(20)  # all dated 2026-07-24
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            result = await retrieve_spots(
+                session, retrieve_all=True, min_posted=datetime(2027, 1, 1, tzinfo=UTC)
+            )
+        # fresh install: the forward pass stores the recent window, the backward pass is filtered
+        assert result["added"] == 20  # forward pass is unfiltered by design
+        async with db() as session:
+            await session.execute(Spot.__table__.delete())
+            await session.commit()
+            floor = await session.get(UsenetState, "spots_floor")
+            floor.cur_article, floor.cur_message_id = 120, ""
+            await session.commit()
+        async with db() as session:
+            again = await retrieve_spots(
+                session, retrieve_all=True, min_posted=datetime(2027, 1, 1, tzinfo=UTC)
+            )
+        assert again["added"] == 0
+    finally:
+        await server.stop()

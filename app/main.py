@@ -29,7 +29,7 @@ from .auth import (
 from .config import BASE_DIR, IMAGES_DIR, get_settings
 from .db import SessionLocal, get_session, init_db
 from .newznab import router as newznab_router
-from .retention import prune_old_spots
+from .retention import prune_old_spots, retention_cutoff
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
 from .seed import seed_if_empty
 from .settings_store import load_settings
@@ -57,7 +57,12 @@ async def _retrieve_loop() -> None:
                 prefs = await load_settings(session)
                 interval = prefs["retrieve_interval"] * 60
                 async with RETRIEVE_LOCK:
-                    result = await retrieve_spots(session, max_backfill=prefs["retrieve_backfill"])
+                    result = await retrieve_spots(
+                        session,
+                        max_backfill=prefs["retrieve_backfill"],
+                        retrieve_all=prefs["retrieve_all"],
+                        min_posted=retention_cutoff(prefs),
+                    )
                 logger.info("spot retrieval: %s", result)
                 await sweep_expired_sessions(session)
                 pruned = await prune_old_spots(session)

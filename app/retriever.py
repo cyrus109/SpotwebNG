@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import json
 import ssl as ssl_module
+from datetime import datetime
 from pathlib import Path
 
 from sqlalchemy import select
@@ -156,8 +157,96 @@ async def _load_provider(session: AsyncSession) -> dict:
     return settings
 
 
-async def retrieve_spots(session: AsyncSession, max_backfill: int = DEFAULT_BACKFILL) -> dict:
-    """Fetch new spot headers and store them. Returns a summary dict."""
+async def _store_rows(
+    session: AsyncSession, rows: list[dict], min_posted: datetime | None = None
+) -> tuple[int, int, int]:
+    """Parse XOVER rows and insert the new spots. Returns (added, invalid, backfilled).
+
+    `min_posted` drops spots older than the cutoff, so a deep backfill doesn't
+    fetch rows that retention="everything" would delete again on the same cycle.
+    """
+    added = invalid = backfilled = 0
+    spots = []
+    for row in rows:
+        # Belt and braces: a parser crash here would escape before the
+        # commit by the caller and freeze the bookmark permanently.
+        try:
+            spot = parse_xover_row(row)
+        except Exception:
+            spot = None
+        if spot is None:
+            invalid += 1
+        elif min_posted is None or spot.stamp is None or spot.stamp >= min_posted:
+            spots.append(spot)
+
+    if not spots:
+        return added, invalid, backfilled
+
+    ids = [s.message_id for s in spots]
+    existing = {
+        row.message_id: row
+        for row in (await session.execute(select(Spot).where(Spot.message_id.in_(ids))))
+        .scalars()
+        .all()
+    }
+    seen_batch: set[str] = set()
+    for s in spots:
+        if s.message_id in seen_batch:
+            continue
+        seen_batch.add(s.message_id)
+        known = existing.get(s.message_id)
+        if known is not None:
+            # Rows stored before subcats existed: fill them in place,
+            # leaving enrichment (images/NZB) untouched.
+            if not known.subcat_z and not known.subcat_a:
+                known.subcat_a = pack_subcats(s.subcats.get("a", []), 64)
+                known.subcat_b = pack_subcats(s.subcats.get("b", []), 64)
+                known.subcat_c = pack_subcats(s.subcats.get("c", []), 64)
+                known.subcat_d = pack_subcats(s.subcats.get("d", []), 128)
+                known.subcat_z = pack_subcats(s.subcats.get("z", []), 32)
+                known.spot_category = s.category
+                backfilled += 1
+            continue
+
+        def _sub(letter: str, limit: int, spot=s) -> str:
+            # bind the current spot: a late-binding closure here
+            # would pack the last spot's subcats into every row
+            return pack_subcats(spot.subcats.get(letter) or [], limit)
+
+        session.add(
+            Spot(
+                message_id=s.message_id[:255],
+                title=s.title[:512],
+                poster=s.poster[:255],
+                category=s.newznab_cat,
+                spot_category=s.category,
+                subcat_a=_sub("a", 64),
+                subcat_b=_sub("b", 64),
+                subcat_c=_sub("c", 64),
+                subcat_d=_sub("d", 128),
+                subcat_z=_sub("z", 32),
+                size=s.filesize,
+                posted_at=s.stamp,
+                description=s.tag[:500] if s.tag else "",
+                nzb_ref=s.message_id[:255],
+            )
+        )
+        added += 1
+    return added, invalid, backfilled
+
+
+async def retrieve_spots(
+    session: AsyncSession,
+    max_backfill: int = DEFAULT_BACKFILL,
+    retrieve_all: bool = False,
+    min_posted: datetime | None = None,
+) -> dict:
+    """Fetch new spot headers and store them. Returns a summary dict.
+
+    With `retrieve_all`, a second pass walks backwards from the lowest article
+    already scanned down to the server's oldest article (its retention limit).
+    That pass is resumable: the `spots_floor` bookmark moves with every chunk.
+    """
     provider = await _load_provider(session)
     client = NntpClient()
     await client.connect(
@@ -182,76 +271,30 @@ async def retrieve_spots(session: AsyncSession, max_backfill: int = DEFAULT_BACK
             state = UsenetState(infotype="spots", cur_article=0, cur_message_id="")
             session.add(state)
 
+        floor = await session.get(UsenetState, "spots_floor")
+        if floor is not None and floor.cur_message_id:
+            msgid = await client.xhdr_message_id(floor.cur_article)
+            if msgid != floor.cur_message_id:
+                # group was renumbered: the floor is meaningless, reseed below
+                floor.cur_article, floor.cur_message_id = 0, ""
+        if floor is None or not floor.cur_article:
+            # Everything below `start` is unscanned, everything from it up is
+            # about to be. (An existing install re-scans a little: dedupe
+            # makes that harmless.)
+            if floor is None:
+                floor = UsenetState(infotype="spots_floor", cur_article=start, cur_message_id="")
+                session.add(floor)
+            else:
+                floor.cur_article = start
+
         scanned = added = invalid = backfilled = 0
         while start <= last:
             end = min(start + INCREMENT - 1, last)
             rows = await client.xover(start, end)
             scanned += len(rows)
 
-            spots = []
-            for row in rows:
-                # Belt and braces: a parser crash here would escape before the
-                # commit below and freeze the bookmark permanently.
-                try:
-                    spot = parse_xover_row(row)
-                except Exception:
-                    spot = None
-                if spot is None:
-                    invalid += 1
-                else:
-                    spots.append(spot)
-
-            if spots:
-                ids = [s.message_id for s in spots]
-                existing = {
-                    row.message_id: row
-                    for row in (await session.execute(select(Spot).where(Spot.message_id.in_(ids))))
-                    .scalars()
-                    .all()
-                }
-                seen_batch: set[str] = set()
-                for s in spots:
-                    if s.message_id in seen_batch:
-                        continue
-                    seen_batch.add(s.message_id)
-                    known = existing.get(s.message_id)
-                    if known is not None:
-                        # Rows stored before subcats existed: fill them in place,
-                        # leaving enrichment (images/NZB) untouched.
-                        if not known.subcat_z and not known.subcat_a:
-                            known.subcat_a = pack_subcats(s.subcats.get("a", []), 64)
-                            known.subcat_b = pack_subcats(s.subcats.get("b", []), 64)
-                            known.subcat_c = pack_subcats(s.subcats.get("c", []), 64)
-                            known.subcat_d = pack_subcats(s.subcats.get("d", []), 128)
-                            known.subcat_z = pack_subcats(s.subcats.get("z", []), 32)
-                            known.spot_category = s.category
-                            backfilled += 1
-                        continue
-
-                    def _sub(letter: str, limit: int, spot=s) -> str:
-                        # bind the current spot: a late-binding closure here
-                        # would pack the last spot's subcats into every row
-                        return pack_subcats(spot.subcats.get(letter) or [], limit)
-
-                    session.add(
-                        Spot(
-                            message_id=s.message_id[:255],
-                            title=s.title[:512],
-                            poster=s.poster[:255],
-                            category=s.newznab_cat,
-                            spot_category=s.category,
-                            subcat_a=_sub("a", 64),
-                            subcat_b=_sub("b", 64),
-                            subcat_c=_sub("c", 64),
-                            subcat_d=_sub("d", 128),
-                            subcat_z=_sub("z", 32),
-                            size=s.filesize,
-                            posted_at=s.stamp,
-                            description=s.tag[:500] if s.tag else "",
-                            nzb_ref=s.message_id[:255],
-                        )
-                    )
-                    added += 1
+            a, i, b = await _store_rows(session, rows)
+            added, invalid, backfilled = added + a, invalid + i, backfilled + b
 
             if rows:
                 state.cur_article = rows[-1]["Number"]
@@ -261,11 +304,35 @@ async def retrieve_spots(session: AsyncSession, max_backfill: int = DEFAULT_BACK
                 start = end + 1
             await session.commit()
 
+        # Backward pass: [target, floor) in descending chunks.
+        target = first if retrieve_all else max(first, last - max_backfill)
+        back_scanned = 0
+        while floor.cur_article > target:
+            hi = floor.cur_article - 1
+            lo = max(target, hi - INCREMENT + 1)
+            rows = await client.xover(lo, hi)
+            back_scanned += len(rows)
+            scanned += len(rows)
+
+            a, i, b = await _store_rows(session, rows, min_posted)
+            added, invalid, backfilled = added + a, invalid + i, backfilled + b
+
+            if rows:
+                lowest = min(rows, key=lambda r: r["Number"])
+                floor.cur_article = lowest["Number"]
+                floor.cur_message_id = lowest.get("Message-ID", "").strip()
+            else:
+                floor.cur_article = lo
+                floor.cur_message_id = ""
+            await session.commit()
+
         return {
             "added": added,
             "backfilled": backfilled,
             "scanned": scanned,
             "invalid": invalid,
+            "backward_scanned": back_scanned,
+            "floor": floor.cur_article,
             "group_first": first,
             "group_last": last,
         }
