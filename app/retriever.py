@@ -310,7 +310,9 @@ async def retrieve_spots(
         while floor.cur_article > target:
             hi = floor.cur_article - 1
             lo = max(target, hi - INCREMENT + 1)
-            rows = await client.xover(lo, hi)
+            # A misbehaving server may answer outside the range; trusting it
+            # could leave the floor unmoved and loop forever.
+            rows = [r for r in await client.xover(lo, hi) if lo <= r["Number"] <= hi]
             back_scanned += len(rows)
             scanned += len(rows)
 

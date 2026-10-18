@@ -491,3 +491,27 @@ async def test_backfill_skips_spots_older_than_the_retention_cutoff(db):
         assert again["added"] == 0
     finally:
         await server.stop()
+
+
+async def test_backward_pass_ends_even_if_the_server_ignores_the_range(db, monkeypatch):
+    from app.retriever import NntpClient
+
+    server = _history()
+    await server.start()
+    await _configure(db, server.port)
+    real_xover = NntpClient.xover
+
+    async def sloppy(self, lo, hi):  # always answers with the whole group
+        return await real_xover(self, 100, 199)
+
+    try:
+        async with db() as session:
+            await retrieve_spots(session, max_backfill=10)
+        monkeypatch.setattr(NntpClient, "xover", sloppy)
+        async with db() as session:
+            result = await asyncio.wait_for(
+                retrieve_spots(session, max_backfill=10, retrieve_all=True), timeout=10
+            )
+        assert result["floor"] == 100
+    finally:
+        await server.stop()
