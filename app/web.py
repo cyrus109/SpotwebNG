@@ -41,6 +41,7 @@ from .auth import (
     verify_credentials,
 )
 from .categories import CATEGORY_NAMES
+from .comments import comment_counts, fetch_comment_bodies
 from .config import BASE_DIR, IMAGES_DIR, get_settings, load_providers
 from .db import SessionLocal, get_session
 from .facets import option_counts, section_counts, section_dimensions
@@ -51,7 +52,7 @@ from .filters import (
     tree_targets_adult,
     visible_sections,
 )
-from .models import ApiUser, Setting, Spot, User
+from .models import ApiUser, Comment, Setting, Spot, User
 from .nntp_check import check_nntp
 from .retention import retention_cutoff
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
@@ -139,6 +140,7 @@ async def home(
         "browse.html",
         {
             "spots": rows,
+            "comment_counts": await comment_counts(session, [s.message_id for s in rows]),
             "total": total,
             "q": q,
             "cat": cat,
@@ -209,12 +211,29 @@ async def detail(
             spot = await get_spot(session, spot_id)
         except Exception:
             pass
+    if prefs["retrieve_comments"]:
+        try:  # bodies cost a request each, so they load on first view
+            await fetch_comment_bodies(session, spot.message_id)
+        except Exception:
+            pass  # provider unreachable: show the headers we have
+    comments = (
+        (
+            await session.execute(
+                select(Comment)
+                .where(Comment.spot_message_id == spot.message_id)
+                .order_by(Comment.posted_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
     api_user = (await session.execute(select(ApiUser))).scalars().first()
     return templates.TemplateResponse(
         request,
         "detail.html",
         {
             "spot": spot,
+            "comments": comments,
             "categories": CATEGORY_NAMES,
             "api_key": api_user.api_key if api_user else "",
             "app_name": get_settings().app_name,

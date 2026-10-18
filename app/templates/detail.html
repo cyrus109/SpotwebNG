@@ -29,4 +29,21 @@
     </p>
   </div>
 </div>
+<section class="comments" id="comments">
+  <h2>Comments ({{ comments | length }})</h2>
+  {% for c in comments %}
+  <article class="comment">
+    <header>
+      <b>{{ c.poster or 'anonymous' }}</b>
+      <span>{{ c.posted_at.strftime('%Y-%m-%d %H:%M') }}</span>
+      <span class="pill" title="Spotnet signatures are not verified yet">unverified</span>
+    </header>
+    {% if c.body_state == 1 and c.body %}<div class="comment-body">{{ c.body }}</div>
+    {% elif c.body_state == 2 %}<div class="comment-body muted">Comment no longer on the server.</div>
+    {% else %}<div class="comment-body muted">Body not loaded.</div>{% endif %}
+  </article>
+  {% else %}
+  <p class="muted">No comments yet.</p>
+  {% endfor %}
+</section>
 {% endblock %}

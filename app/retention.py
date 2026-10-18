@@ -17,7 +17,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import IMAGES_DIR, NZB_DIR
-from .models import Spot
+from .models import Comment, Spot
 from .settings_store import load_settings
 
 PRUNED = 3
@@ -66,6 +66,8 @@ async def prune_old_spots(session: AsyncSession, now: datetime | None = None) ->
             await asyncio.to_thread(_remove_artifacts_many, list(batch))
             await session.execute(delete(Spot).where(Spot.id.in_(batch)))
             await session.commit()
+        await session.execute(delete(Comment).where(Comment.posted_at < cutoff))
+        await session.commit()
         return {"deleted": len(doomed), "stripped": 0, "cutoff": cutoff.isoformat()}
 
     stripped = 0

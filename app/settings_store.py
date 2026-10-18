@@ -7,6 +7,7 @@ clamping so a bad value in the database can never break a page render.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from sqlalchemy import select
@@ -19,6 +20,8 @@ SPEC: dict[str, tuple[Any, str]] = {
     # retrieval
     "retrieve_interval": (15, "int"),  # minutes between automatic runs
     "retrieve_backfill": (20000, "int"),  # articles to scan on a first run
+    "retrieve_comments": (True, "bool"),  # index comment headers (bodies load on view)
+    "comment_group": ("free.usenet", "str"),  # newsgroup Spotnet comments are posted to
     "retrieve_all": (False, "bool"),  # walk back to the server's oldest article
     "auto_enrich": (True, "bool"),  # fetch images/NZB refs in the background
     # retention
@@ -67,6 +70,8 @@ def _coerce(key: str, raw: str) -> Any:
     if kind == "bool":
         return str(raw).strip().lower() in ("1", "true", "on", "yes")
     text = str(raw).strip()
+    if key == "comment_group" and not re.match(r"^[A-Za-z0-9._+-]{1,128}$", text):
+        return default  # it ends up in an NNTP command line
     allowed = CHOICES.get(key)
     if allowed and text not in allowed:
         return default

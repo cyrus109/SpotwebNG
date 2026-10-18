@@ -26,6 +26,7 @@ from .auth import (
     migrate_legacy_account,
     sweep_expired_sessions,
 )
+from .comments import retrieve_comments
 from .config import BASE_DIR, IMAGES_DIR, get_settings
 from .db import SessionLocal, get_session, init_db
 from .newznab import router as newznab_router
@@ -63,7 +64,20 @@ async def _retrieve_loop() -> None:
                         retrieve_all=prefs["retrieve_all"],
                         min_posted=retention_cutoff(prefs),
                     )
-                logger.info("spot retrieval: %s", result)
+                    logger.info("spot retrieval: %s", result)
+                    if prefs["retrieve_comments"]:
+                        # A comments failure must not mask (or abort) the spot run above.
+                        try:
+                            cresult = await retrieve_comments(
+                                session,
+                                group=prefs["comment_group"],
+                                max_backfill=prefs["retrieve_backfill"],
+                                retrieve_all=prefs["retrieve_all"],
+                                min_posted=retention_cutoff(prefs),
+                            )
+                            logger.info("comment retrieval: %s", cresult)
+                        except Exception:
+                            logger.exception("comment retrieval failed")
                 await sweep_expired_sessions(session)
                 pruned = await prune_old_spots(session)
                 if pruned["deleted"] or pruned["stripped"]:

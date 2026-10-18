@@ -54,6 +54,22 @@ class Spot(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class Comment(Base):
+    """A Spotnet comment. Header comes from XOVER; the body is fetched on demand."""
+
+    __tablename__ = "comments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    message_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    # Message-id of the spot this comments on (derived from our own id, see comments.py).
+    spot_message_id: Mapped[str] = mapped_column(String(255), index=True)
+    poster: Mapped[str] = mapped_column(String(80), default="")
+    posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
+    body: Mapped[str] = mapped_column(Text, default="")
+    # 0 = body not fetched yet, 1 = fetched, 2 = gone from the server.
+    body_state: Mapped[int] = mapped_column(Integer, default=0)
+
+
 class ApiUser(Base):
     """A consumer of the Newznab API (e.g. a Radarr/Sonarr instance)."""
 

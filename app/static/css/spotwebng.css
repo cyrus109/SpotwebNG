@@ -835,3 +835,10 @@ a { color: inherit; text-decoration: none; }
   background: var(--ds-bg-base); border: 1px solid var(--ds-glass-border);
   border-radius: var(--ds-radius-md); color: var(--ds-text-primary); font-family: inherit;
 }
+
+/* comments */
+.comments { margin-top: var(--ds-space-8, 2rem); }
+.comment { padding: var(--ds-space-3, .75rem) 0; border-top: 1px solid var(--ds-border, rgba(255,255,255,.1)); }
+.comment header { display: flex; gap: var(--ds-space-3, .75rem); align-items: center; font-size: var(--ds-text-xs, .75rem); color: var(--ds-text-muted); }
+.comment-body { margin-top: .4rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.comments .muted { color: var(--ds-text-muted); }

@@ -60,7 +60,7 @@
     {% endif %}
     <div class="poster-overlay">
       <div class="poster-title">{{ s.title }}</div>
-      <div class="poster-meta"><span>{{ s.size | gb }}</span><span>·</span><span>{{ s.posted_at.strftime('%Y-%m-%d') }}</span></div>
+      <div class="poster-meta"><span>{{ s.size | gb }}</span><span>·</span><span>{{ s.posted_at.strftime('%Y-%m-%d') }}</span>{% if comment_counts.get(s.message_id) %}<span>·</span><span title="Comments">💬 {{ comment_counts[s.message_id] }}</span>{% endif %}</div>
     </div>
   </a>
   {% endfor %}
@@ -72,7 +72,7 @@
   <tbody>
   {% for s in spots %}
     <tr onclick="location.href='/spot/{{ s.id }}'" style="cursor:pointer">
-      <td class="t-title">{{ s.title }}</td>
+      <td class="t-title">{{ s.title }}{% if comment_counts.get(s.message_id) %} <span class="pill" title="Comments">💬 {{ comment_counts[s.message_id] }}</span>{% endif %}</td>
       <td>{{ s.category | catname }}</td>
       <td>{{ s.size | gb }}</td>
       <td>{{ s.posted_at.strftime('%Y-%m-%d %H:%M') }}</td>

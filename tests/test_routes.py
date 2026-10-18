@@ -463,3 +463,42 @@ async def test_adult_content_is_served_when_the_admin_allows_it(with_adult):
         await s.commit()
     body = (await c.get(f"/api?t=search&apikey={KEY}")).text
     assert "Not Safe" in body
+
+
+# --- comments ----------------------------------------------------------
+
+
+async def test_detail_page_shows_comments_escaped_and_the_grid_shows_a_count(client):
+    from sqlalchemy import select
+
+    from app.models import Comment
+
+    c, factory = client
+    async with factory() as s:
+        spot = (await s.execute(select(Spot).where(Spot.message_id == "<r1@x>"))).scalar_one()
+        s.add(
+            Comment(
+                message_id="<r1.5.a.b@x>",
+                spot_message_id="<r1@x>",
+                poster="<b>Mallory</b>",
+                posted_at=NOW,
+                body="<script>alert(1)</script> hi",
+                body_state=1,
+            )
+        )
+        await s.commit()
+        spot_id = spot.id
+    page = (await c.get(f"/spot/{spot_id}")).text
+    assert "Comments (1)" in page
+    assert "<script>alert(1)</script>" not in page and "&lt;script&gt;" in page
+    assert "&lt;b&gt;Mallory" in page
+    assert "💬 1" in (await c.get("/")).text
+
+
+async def test_comments_of_a_hidden_adult_spot_are_unreachable(with_adult):
+    from sqlalchemy import select
+
+    c, factory = with_adult
+    async with factory() as s:
+        adult = (await s.execute(select(Spot).where(Spot.message_id == "<xxx@x>"))).scalar_one()
+    assert (await c.get(f"/spot/{adult.id}")).status_code == 404

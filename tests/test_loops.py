@@ -33,6 +33,7 @@ async def _fake_settings(session):
         "retrieve_interval": 1,
         "retrieve_backfill": 100,
         "retrieve_all": False,
+        "retrieve_comments": False,
         "retention_days": 0,
         "retention_type": "fullonly",
         "auto_enrich": True,

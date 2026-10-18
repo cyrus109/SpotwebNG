@@ -96,6 +96,25 @@
       </label>
       <label class="set-row set-row-toggle">
         <div class="set-info">
+          <span class="set-name">Index comments</span>
+          <span class="set-desc">Read Spotnet comments. Headers are indexed in the background; each comment's text loads when you open the spot.</span>
+        </div>
+        <div class="set-control set-control-end">
+          <input type="hidden" name="retrieve_comments__present" value="1">
+          <input type="checkbox" class="switch" name="retrieve_comments" {{ 'checked' if values.retrieve_comments }}>
+        </div>
+      </label>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="comment_group">Comments newsgroup</label>
+          <span class="set-desc">Where your provider carries Spotnet comments.</span>
+        </div>
+        <div class="set-control input-unit">
+          <input type="text" name="comment_group" id="comment_group" maxlength="128" pattern="[A-Za-z0-9._+\-]+" value="{{ values.comment_group }}">
+        </div>
+      </div>
+      <label class="set-row set-row-toggle">
+        <div class="set-info">
           <span class="set-name">Background enrichment</span>
           <span class="set-desc">Fetch covers, descriptions and NZB references in the background.</span>
         </div>
