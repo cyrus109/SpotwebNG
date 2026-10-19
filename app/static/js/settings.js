@@ -46,6 +46,31 @@
     });
   }
 
+  // --- SABnzbd test -----------------------------------------------------
+  const sabBtn = document.getElementById("sabTest");
+  if (sabBtn) {
+    sabBtn.addEventListener("click", async () => {
+      const msg = document.getElementById("sabTestMsg");
+      sabBtn.disabled = true;
+      msg.textContent = "Testing…";
+      try {
+        const body = new URLSearchParams({
+          url: document.getElementById("sab_url").value,
+          apikey: document.getElementById("sab_apikey").value,
+        });
+        const r = await (await fetch("/settings/sab/test", { method: "POST", body })).json();
+        msg.textContent = (r.ok ? "✓ " : "✗ ") + (r.message || "");
+        const list = document.getElementById("sabCats");
+        if (r.ok && r.categories && list) {
+          list.replaceChildren(...r.categories.map((c) => Object.assign(document.createElement("option"), { value: c })));
+        }
+      } catch (e) {
+        msg.textContent = "✗ Request failed";
+      }
+      sabBtn.disabled = false;
+    });
+  }
+
   // --- copy API key -----------------------------------------------------
   // navigator.clipboard only exists in a secure context — this app is served
   // over plain HTTP on a LAN, so fall back to a hidden textarea + execCommand.

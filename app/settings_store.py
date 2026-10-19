@@ -15,11 +15,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Setting
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
 # key -> (default, kind). kind drives coercion and form handling.
 SPEC: dict[str, tuple[Any, str]] = {
     # retrieval
     "retrieve_interval": (15, "int"),  # minutes between automatic runs
-    "retrieve_backfill": (20000, "int"),  # articles to scan on a first run
+    "retrieve_backfill": (20000, "int"),  # first run: this many articles or days (see unit)
+    "retrieve_backfill_unit": ("articles", "str"),
     "retrieve_comments": (True, "bool"),  # index comment headers (bodies load on view)
     "comment_group": ("free.usenet", "str"),  # newsgroup Spotnet comments are posted to
     "retrieve_all": (False, "bool"),  # walk back to the server's oldest article
@@ -28,6 +31,13 @@ SPEC: dict[str, tuple[Any, str]] = {
     # retention
     "retention_days": (0, "int"),  # 0 = keep forever
     "retention_type": ("fullonly", "str"),  # fullonly | everything
+    # sending a spot's NZB to a downloader
+    "nzb_action": ("download", "str"),  # download | sabnzbd | blackhole
+    "sab_url": ("", "str"),
+    "sab_apikey": ("", "secret"),  # never rendered back into a page
+    "sab_category": ("", "str"),
+    "sab_priority": (-100, "int"),  # SABnzbd: -100 category default .. 2 force
+    "blackhole_dir": ("", "str"),
     # display
     "per_page": (120, "int"),
     "default_sort": ("new", "str"),
@@ -44,12 +54,15 @@ DEFAULTS: dict[str, Any] = {key: default for key, (default, _) in SPEC.items()}
 CLAMPS = {
     "per_page": (12, 500),
     "retrieve_interval": (5, 1440),
-    "retrieve_backfill": (1000, 500_000),
+    "retrieve_backfill": (1, 100_000_000),
     "retention_days": (0, 3650),
     "retrieve_days": (0, 36500),
+    "sab_priority": (-100, 2),
 }
 
 CHOICES = {
+    "retrieve_backfill_unit": ("articles", "days"),
+    "nzb_action": ("download", "sabnzbd", "blackhole"),
     "retention_type": ("fullonly", "everything"),
     "default_sort": ("new", "old", "size", "title"),
     "default_view": ("grid", "table"),
@@ -71,7 +84,9 @@ def _coerce(key: str, raw: str) -> Any:
         return value
     if kind == "bool":
         return str(raw).strip().lower() in ("1", "true", "on", "yes")
-    text = str(raw).strip()
+    text = _CONTROL.sub("", str(raw)).strip()
+    if key == "sab_url":  # an http(s) base URL, or nothing
+        return text.rstrip("/") if re.fullmatch(r"https?://[^\s]+", text) else default
     if key == "comment_group" and not re.match(r"^[A-Za-z0-9._+-]{1,128}$", text):
         return default  # it ends up in an NNTP command line
     allowed = CHOICES.get(key)
@@ -89,6 +104,26 @@ async def load_settings(session: AsyncSession) -> dict[str, Any]:
     }
 
 
+def backfill_plan(prefs: dict[str, Any]) -> dict[str, Any]:
+    """Turn the backfill / history settings into retrieve_spots arguments.
+
+    In *days* mode the first run is "walk back N days", which is the history
+    walk with a day limit; the article window then only seeds the starting chunk.
+    """
+    full, limit = prefs["retrieve_all"], prefs["retrieve_days"]
+    if prefs["retrieve_backfill_unit"] == "days" and not full:
+        return {
+            "max_backfill": 5000,
+            "retrieve_all": True,
+            "max_age_days": min(prefs["retrieve_backfill"], 36500),
+        }
+    return {
+        "max_backfill": max(prefs["retrieve_backfill"], 1000),
+        "retrieve_all": full,
+        "max_age_days": limit if full else 0,
+    }
+
+
 async def get_setting(session: AsyncSession, key: str) -> Any:
     return (await load_settings(session)).get(key)
 
@@ -103,6 +138,8 @@ async def save_settings(session: AsyncSession, values: dict[str, str]) -> dict[s
         present = key in values
         if kind == "bool" and f"{key}__present" in values:
             raw = "on" if present else ""
+        elif present and kind == "secret" and not values[key]:
+            continue  # a blank secret field means "unchanged": it is never sent back
         elif present:
             raw = values[key]
         else:

@@ -8,7 +8,7 @@
       <div class="rail-title">Settings</div>
       <div class="rail-nav">
         <a href="#all" class="rail-link" data-section="all"><span class="rail-text">All settings</span></a>
-        {% for key, label in [('usenet','Usenet provider'),('retrieval','Retrieval &amp; retention'),('status','Status &amp; backup'),
+        {% for key, label in [('usenet','Usenet provider'),('retrieval','Retrieval &amp; retention'),('status','Status &amp; backup'),('downloads','Download client'),
                               ('display','Display'),('appearance','Appearance'),
                               ('api','API access'),('account','Your account'),('users','Users')] %}
         <a href="#{{ key }}" class="rail-link" data-section="{{ key }}"><span class="rail-text">{{ label | safe }}</span></a>
@@ -78,10 +78,14 @@
       <div class="set-row">
         <div class="set-info">
           <label class="set-name" for="retrieve_backfill">First-run backfill</label>
-          <span class="set-desc">Articles fetched when the database is empty.</span>
+          <span class="set-desc">How far back the first retrieval goes: a number of articles, or a number of days.</span>
         </div>
         <div class="set-control input-unit">
-          <input type="number" min="1000" max="500000" step="1000" name="retrieve_backfill" id="retrieve_backfill" value="{{ values.retrieve_backfill }}"><span class="unit">articles</span>
+          <input type="number" min="1" step="1" name="retrieve_backfill" id="retrieve_backfill" value="{{ values.retrieve_backfill }}">
+          <select name="retrieve_backfill_unit" id="retrieve_backfill_unit" data-ui-select aria-label="Backfill unit">
+            <option value="articles" {{ 'selected' if values.retrieve_backfill_unit == 'articles' }}>articles</option>
+            <option value="days" {{ 'selected' if values.retrieve_backfill_unit == 'days' }}>days</option>
+          </select>
         </div>
       </div>
       <label class="set-row set-row-toggle">
@@ -211,6 +215,74 @@
     </div>
   </section>
 
+  <section class="card" id="downloads">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h2>Download client</h2>
+        <p class="card-sub">Send a spot's NZB straight from its page. Normal NZB download always stays available.</p>
+      </div>
+    </div>
+    <div class="card-rows">
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="nzb_action">Send button</label>
+          <span class="set-desc">What the "Send" button on a spot page does (administrators only).</span>
+        </div>
+        <div class="set-control">
+          <select name="nzb_action" id="nzb_action" data-ui-select>
+            <option value="download" {{ 'selected' if values.nzb_action == 'download' }}>Off — download only</option>
+            <option value="sabnzbd" {{ 'selected' if values.nzb_action == 'sabnzbd' }}>Send to SABnzbd</option>
+            <option value="blackhole" {{ 'selected' if values.nzb_action == 'blackhole' }}>Save to a black-hole folder</option>
+          </select>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="sab_url">SABnzbd URL</label>
+          <span class="set-desc">For example http://sabnzbd:8080 &mdash; reachable from this server.</span>
+        </div>
+        <div class="set-control"><input type="url" name="sab_url" id="sab_url" value="{{ values.sab_url }}" placeholder="http://sabnzbd:8080" autocomplete="off"></div>
+      </div>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="sab_apikey">SABnzbd API key</label>
+          <span class="set-desc">{{ 'A key is saved. Leave blank to keep it.' if values.sab_apikey else 'SABnzbd → Config → General → API Key (or the NZB key).' }}</span>
+        </div>
+        <div class="set-control"><input type="password" name="sab_apikey" id="sab_apikey" value="" autocomplete="new-password" placeholder="{{ '••••••••' if values.sab_apikey }}"></div>
+      </div>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="sab_category">Category</label>
+          <span class="set-desc">Must exist in SABnzbd; blank uses its default.</span>
+        </div>
+        <div class="set-control"><input type="text" name="sab_category" id="sab_category" maxlength="64" value="{{ values.sab_category }}" list="sabCats" autocomplete="off"><datalist id="sabCats"></datalist></div>
+      </div>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="sab_priority">Priority</label>
+        </div>
+        <div class="set-control">
+          <select name="sab_priority" id="sab_priority" data-ui-select>
+            {% for v, label in [(-100,'Category default'),(-2,'Paused'),(-1,'Low'),(0,'Normal'),(1,'High'),(2,'Force')] %}
+            <option value="{{ v }}" {{ 'selected' if values.sab_priority == v }}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="blackhole_dir">Black-hole folder</label>
+          <span class="set-desc">An absolute path as the app sees it. In Docker, mount the folder into the container first.</span>
+        </div>
+        <div class="set-control"><input type="text" name="blackhole_dir" id="blackhole_dir" value="{{ values.blackhole_dir }}" placeholder="/blackhole" autocomplete="off"></div>
+      </div>
+      <div class="set-row">
+        <div class="set-info"><span class="set-name">Test SABnzbd</span><span class="set-desc" id="sabTestMsg">Uses the URL and key above (the saved key if left blank).</span></div>
+        <div class="set-control"><button class="btn-glass" type="button" id="sabTest">Test connection</button></div>
+      </div>
+    </div>
+  </section>
+
   <section class="card" id="appearance">
     <div class="card-head">
       <div class="card-head-text">
@@ -256,6 +328,18 @@
       <a class="btn-glass" href="/settings/export" download>⬇ Export database</a>
       <input type="file" id="importFile" accept=".gz,application/gzip" aria-label="Export file to import">
       <button class="btn-glass" type="button" id="importBtn">⬆ Import</button>
+    </div>
+    <div class="card-actions maint">
+      <select id="maintAction" data-ui-select aria-label="Maintenance action">
+        <option value="prune">Apply retention now</option>
+        <option value="orphans">Remove orphan comments &amp; cached files</option>
+        <option value="vacuum">Compact the database</option>
+        <option value="reset-bookmarks">Reset retrieval position (keep spots)</option>
+        <option value="wipe-comments">Delete all comments</option>
+        <option value="wipe">Delete ALL spots &amp; comments (start from zero)</option>
+      </select>
+      <button class="btn-glass" type="button" id="maintBtn">Run</button>
+      <span class="hint" id="maintMsg" role="status"></span>
     </div>
     <div class="hint card-footnote" id="importMsg">
       Exports hold spots, comments and where retrieval stopped &mdash; never passwords, users or API keys.

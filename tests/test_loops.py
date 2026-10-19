@@ -34,6 +34,7 @@ async def _fake_settings(session):
         "retrieve_backfill": 100,
         "retrieve_all": False,
         "retrieve_days": 0,
+        "retrieve_backfill_unit": "articles",
         "retrieve_comments": False,
         "retention_days": 0,
         "retention_type": "fullonly",

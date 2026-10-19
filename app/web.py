@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import secrets
 import shutil
 import tempfile
@@ -49,6 +50,7 @@ from .categories import CATEGORY_NAMES
 from .comments import comment_counts, fetch_comment_bodies
 from .config import BASE_DIR, IMAGES_DIR, get_settings, load_providers
 from .db import SessionLocal, get_session
+from .downloader import check_sabnzbd, send_spot
 from .facets import option_counts, section_counts, section_dimensions
 from .filters import (
     FILTER_SECTIONS,
@@ -57,12 +59,13 @@ from .filters import (
     tree_targets_adult,
     visible_sections,
 )
+from .maintenance import ACTIONS, DESTRUCTIVE, run_maintenance
 from .models import ApiUser, Comment, Setting, Spot, User
 from .nntp_check import check_nntp
 from .progress import LIVE, history_percent, live_idle, live_set, load_status, save_status
 from .retention import retention_cutoff
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
-from .settings_store import load_settings, save_settings
+from .settings_store import backfill_plan, load_settings, save_settings
 from .spots import get_spot, is_adult_spot, search_spots
 
 router = APIRouter()
@@ -240,12 +243,52 @@ async def detail(
         {
             "spot": spot,
             "comments": comments,
+            "send_label": (
+                {"sabnzbd": "Send to SABnzbd", "blackhole": "Save to black hole"}.get(
+                    prefs["nzb_action"]
+                )
+                if await is_admin(session, request.cookies.get(COOKIE))
+                else None
+            ),
             "categories": CATEGORY_NAMES,
             "api_key": api_user.api_key if api_user else "",
             "app_name": get_settings().app_name,
             "theme": await _theme(session),
         },
     )
+
+
+@router.post("/spot/{spot_id}/send")
+async def send_spot_route(
+    request: Request, spot_id: int, session: AsyncSession = Depends(get_session)
+) -> JSONResponse:
+    """Send a spot's NZB to SABnzbd or the black-hole folder (admins only)."""
+    if not await is_admin(session, request.cookies.get(COOKIE)):
+        return JSONResponse({"ok": False, "message": "Administrators only"}, status_code=403)
+    spot = await get_spot(session, spot_id)
+    prefs = await load_settings(session)
+    if spot is None or (prefs["hide_adult"] and is_adult_spot(spot)):
+        return JSONResponse({"ok": False, "message": "Not found"}, status_code=404)
+    if spot.enriched == 0:
+        try:
+            await enrich_new_spots(session, images_dir=IMAGES_DIR, limit=1, only_id=spot_id)
+            spot = await get_spot(session, spot_id)
+        except Exception:
+            pass
+    result = await send_spot(session, spot, prefs)
+    return JSONResponse(result, status_code=200 if result["ok"] else 502)
+
+
+@router.post("/settings/sab/test")
+async def sab_test(
+    url: str = Form(""), apikey: str = Form(""), session: AsyncSession = Depends(get_session)
+) -> JSONResponse:
+    """Check SABnzbd with the form's values; a blank key means the saved one."""
+    prefs = await load_settings(session)
+    target = url.strip().rstrip("/")
+    if not re.fullmatch(r"https?://[^\s]+", target):
+        return JSONResponse({"ok": False, "message": "Enter an http(s):// URL"})
+    return JSONResponse(await check_sabnzbd(target, apikey or prefs["sab_apikey"]))
 
 
 @router.get("/setup", response_class=HTMLResponse)
@@ -278,7 +321,7 @@ async def _full_history_run() -> None:
             prefs = await load_settings(session)
             result = await retrieve_spots(
                 session,
-                max_backfill=prefs["retrieve_backfill"],
+                max_backfill=backfill_plan(prefs)["max_backfill"],
                 retrieve_all=True,
                 min_posted=retention_cutoff(prefs),
                 max_age_days=prefs["retrieve_days"],
@@ -306,7 +349,9 @@ async def retrieve_now(
         return JSONResponse({"ok": True, "started": True, "added": 0})
     async with RETRIEVE_LOCK:
         try:
-            result = await retrieve_spots(session, max_backfill=prefs["retrieve_backfill"])
+            result = await retrieve_spots(
+                session, max_backfill=backfill_plan(prefs)["max_backfill"]
+            )
         except ValueError as exc:
             return JSONResponse({"ok": False, "message": str(exc)}, status_code=400)
         except Exception as exc:
@@ -336,6 +381,33 @@ async def retrieve_status(session: AsyncSession = Depends(get_session)) -> JSONR
             "retrieve_days": prefs["retrieve_days"],
         }
     )
+
+
+@router.post("/settings/maintenance")
+async def maintenance(
+    action: str = Form(...), confirm: str = Form(""), session: AsyncSession = Depends(get_session)
+) -> JSONResponse:
+    """Clean up, reset or wipe the index. Destructive actions need confirm=DELETE."""
+    if action not in ACTIONS:
+        return JSONResponse({"ok": False, "message": "Unknown action"}, status_code=400)
+    if action in DESTRUCTIVE and confirm != "DELETE":
+        return JSONResponse({"ok": False, "message": "Type DELETE to confirm"}, status_code=400)
+    if RETRIEVE_LOCK.locked():
+        return JSONResponse(
+            {"ok": False, "message": "A retrieval or import is running; try again later"},
+            status_code=409,
+        )
+    async with RETRIEVE_LOCK:
+        try:
+            message = await run_maintenance(session, action)
+        except Exception as exc:
+            logging.getLogger("spotwebng").exception("maintenance %s failed", action)
+            return JSONResponse(
+                {"ok": False, "message": f"Failed ({type(exc).__name__}); see the server log"},
+                status_code=500,
+            )
+    logging.getLogger("spotwebng").info("maintenance %s: %s", action, message)
+    return JSONResponse({"ok": True, "message": message})
 
 
 @router.get("/settings/export")

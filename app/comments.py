@@ -71,7 +71,7 @@ async def retrieve_comments(
 ) -> dict:
     """Fetch new comment headers. Forward only: the first run starts `max_backfill`
     articles back (or at the group's first article with `retrieve_all`)."""
-    if retrieve_all and max_age_days:  # same day limit as the spot history
+    if max_age_days:  # same day limit as the spot history
         age_cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
         min_posted = age_cutoff if min_posted is None else max(min_posted, age_cutoff)
     if not GROUP_RE.match(group):

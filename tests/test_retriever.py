@@ -590,3 +590,34 @@ async def test_the_server_range_and_oldest_date_are_remembered(db):
         assert history_percent(status) == 100.0  # reached the server's first article
     finally:
         await server.stop()
+
+
+async def test_days_mode_first_run_walks_back_that_many_days(db, monkeypatch):
+    from datetime import datetime
+
+    from app.settings_store import backfill_plan
+
+    monkeypatch.setattr("app.retriever.INCREMENT", 10)
+    now = datetime.now(UTC)
+    server = FakeNewsServer(
+        first=100, articles={n: _dated_line(n, 199 - n, now) for n in range(100, 200)}
+    )
+    await server.start()
+    await _configure(db, server.port)
+    prefs = {
+        "retrieve_all": False,
+        "retrieve_days": 0,
+        "retrieve_backfill": 20,
+        "retrieve_backfill_unit": "days",
+    }
+    try:
+        async with db() as session:
+            plan = backfill_plan(prefs)
+            plan["max_backfill"] = 5  # the seed window is tiny in this 100-article group
+            await retrieve_spots(session, **plan)
+        async with db() as session:
+            oldest = (await session.execute(select(func.min(Spot.posted_at)))).scalar_one()
+        assert (now - oldest.replace(tzinfo=UTC)).days <= 20
+        assert 15 <= await _count(db) <= 21  # about 20 days of spots, not the whole group
+    finally:
+        await server.stop()

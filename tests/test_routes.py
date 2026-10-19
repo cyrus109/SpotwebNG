@@ -554,3 +554,176 @@ async def test_import_route_runs_in_the_background_and_reports(client):
             break
         await asyncio.sleep(0.05)
     assert status["last_import"]["ok"] is False
+
+
+# --- sending to a downloader ------------------------------------------------
+
+
+async def _set(factory, **values):
+    async with factory() as s:
+        for k, v in values.items():
+            row = await s.get(Setting, k)
+            if row:
+                row.value = v
+            else:
+                s.add(Setting(key=k, value=v))
+        await s.commit()
+
+
+async def _first_spot_id(factory) -> int:
+    from sqlalchemy import select
+
+    async with factory() as s:
+        return (await s.execute(select(Spot.id).where(Spot.message_id == "<r1@x>"))).scalar_one()
+
+
+async def test_send_to_blackhole_is_admin_only_and_writes_the_nzb(client, tmp_path, monkeypatch):
+    async def fake_nzb(session, spot):
+        return b"<nzb>real</nzb>"
+
+    monkeypatch.setattr("app.newznab._real_nzb", fake_nzb)
+    c, factory = client
+    await _set(factory, nzb_action="blackhole", blackhole_dir=str(tmp_path))
+    spot_id = await _first_spot_id(factory)
+    async with factory() as s:
+        await create_user(s, "boss", "pw-boss-12345", ADMIN)
+        await create_user(s, "view", "pw-view-12345", "viewer")
+    await c.post("/login", data={"username": "view", "password": "pw-view-12345"})
+    assert (await c.post(f"/spot/{spot_id}/send")).status_code == 403
+    assert list(tmp_path.iterdir()) == []
+    assert "Save to black hole" not in (await c.get(f"/spot/{spot_id}")).text
+    await c.post("/logout")
+    await c.post("/login", data={"username": "boss", "password": "pw-boss-12345"})
+    assert "Save to black hole" in (await c.get(f"/spot/{spot_id}")).text
+    resp = await c.post(f"/spot/{spot_id}/send")
+    assert resp.status_code == 200 and resp.json()["ok"] is True
+    assert [p.read_bytes() for p in tmp_path.iterdir()] == [b"<nzb>real</nzb>"]
+
+
+async def test_send_is_refused_when_off_or_for_hidden_adult_spots(
+    with_adult, tmp_path, monkeypatch
+):
+    async def fake_nzb(session, spot):
+        return b"<nzb/>"
+
+    monkeypatch.setattr("app.newznab._real_nzb", fake_nzb)
+    c, factory = with_adult
+    await _admin(c, factory)
+    spot_id = await _first_spot_id(factory)
+    off = await c.post(f"/spot/{spot_id}/send")
+    assert off.status_code == 502 and "turned off" in off.json()["message"]
+    await _set(factory, nzb_action="blackhole", blackhole_dir=str(tmp_path))
+    for adult_id in await _adult_ids(factory):
+        assert (await c.post(f"/spot/{adult_id}/send")).status_code == 404
+    assert list(tmp_path.iterdir()) == []
+
+
+async def test_the_sabnzbd_key_is_never_rendered_and_blank_keeps_it(client):
+    c, factory = client
+    await _admin(c, factory)
+    await c.post("/settings", data={"sab_apikey": "topsecretkey123", "sab_url": "http://sab:8080"})
+    page = (await c.get("/settings")).text
+    assert "topsecretkey123" not in page and "A key is saved" in page
+    await c.post("/settings", data={"sab_apikey": "", "sab_category": "tv"})
+    from sqlalchemy import select
+
+    async with factory() as s:
+        kept = (await s.execute(select(Setting).where(Setting.key == "sab_apikey"))).scalar_one()
+    assert kept.value == "topsecretkey123"
+
+
+# --- maintenance commands -------------------------------------------------
+
+
+@pytest.fixture
+def cache_dirs(tmp_path, monkeypatch):
+    """Point the cache dirs at a temp folder: a wipe must never touch real files."""
+    images, nzbs = tmp_path / "images", tmp_path / "nzbs"
+    images.mkdir()
+    nzbs.mkdir()
+    monkeypatch.setattr("app.maintenance.IMAGES_DIR", images)
+    monkeypatch.setattr("app.maintenance.NZB_DIR", nzbs)
+    return images, nzbs
+
+
+async def _maint(c, action, confirm=""):
+    return await c.post("/settings/maintenance", data={"action": action, "confirm": confirm})
+
+
+async def test_destructive_maintenance_needs_the_typed_confirmation(client, cache_dirs):
+    from sqlalchemy import func, select
+
+    c, factory = client
+    await _admin(c, factory)
+    for action in ("wipe", "wipe-comments"):
+        assert (await _maint(c, action)).status_code == 400
+        assert (await _maint(c, action, "delete")).status_code == 400
+    assert (await _maint(c, "nonsense")).status_code == 400
+    async with factory() as s:
+        assert (await s.execute(select(func.count()).select_from(Spot))).scalar_one() == 8
+
+
+async def test_wipe_starts_from_zero_but_keeps_accounts_settings_and_keys(client, cache_dirs):
+    from sqlalchemy import func, select
+
+    from app.models import Comment, UsenetState
+
+    images, nzbs = cache_dirs
+    (images / "1.jpg").write_bytes(b"x")
+    (nzbs / "1.nzb").write_bytes(b"x")
+    c, factory = client
+    await _admin(c, factory)
+    async with factory() as s:
+        s.add(UsenetState(infotype="spots", cur_article=5, cur_message_id="<a@b>"))
+        s.add(Comment(message_id="<r1.1.a@x>", spot_message_id="<r1@x>", posted_at=NOW))
+        await s.commit()
+    resp = await _maint(c, "wipe", "DELETE")
+    assert resp.status_code == 200 and "starting from zero" in resp.json()["message"]
+    async with factory() as s:
+        for model in (Spot, Comment, UsenetState):
+            assert (await s.execute(select(func.count()).select_from(model))).scalar_one() == 0
+        assert (await s.execute(select(func.count()).select_from(ApiUser))).scalar_one() == 1
+        assert await s.get(Setting, "provider_host") is not None
+    assert list(images.iterdir()) == [] and list(nzbs.iterdir()) == []
+    assert (await c.get("/settings")).status_code == 200  # still signed in
+
+
+async def test_cleanup_actions_remove_only_what_is_orphaned(client, cache_dirs):
+    from sqlalchemy import select
+
+    from app.models import Comment, UsenetState
+
+    images, nzbs = cache_dirs
+    c, factory = client
+    await _admin(c, factory)
+    real_id = await _first_spot_id(factory)
+    (images / f"{real_id}.jpg").write_bytes(b"keep")
+    (images / "99999.jpg").write_bytes(b"orphan")
+    async with factory() as s:
+        s.add(Comment(message_id="<r1.1.a@x>", spot_message_id="<r1@x>", posted_at=NOW))
+        s.add(Comment(message_id="<gone.1.a@x>", spot_message_id="<gone@x>", posted_at=NOW))
+        s.add(UsenetState(infotype="spots", cur_article=5, cur_message_id="<a@b>"))
+        await s.commit()
+    result = (await _maint(c, "orphans")).json()
+    assert result["ok"] and "1 orphan comments" in result["message"]
+    assert [p.name for p in images.iterdir()] == [f"{real_id}.jpg"]
+    async with factory() as s:
+        left = (await s.execute(select(Comment.message_id))).scalars().all()
+    assert left == ["<r1.1.a@x>"]
+    assert (await _maint(c, "vacuum")).json()["ok"] is True
+    assert (await _maint(c, "prune")).json()["ok"] is True
+    reset = (await _maint(c, "reset-bookmarks")).json()
+    assert reset["ok"]
+    async with factory() as s:
+        assert await s.get(UsenetState, "spots") is None
+        assert (await s.execute(select(Spot))).scalars().first() is not None  # spots kept
+
+
+async def test_maintenance_is_admin_only(client, cache_dirs):
+    c, factory = client
+    async with factory() as s:
+        await create_user(s, "boss", "pw-boss-12345", ADMIN)
+        await create_user(s, "view", "pw-view-12345", "viewer")
+    await c.post("/login", data={"username": "view", "password": "pw-view-12345"})
+    resp = await _maint(c, "wipe", "DELETE")
+    assert resp.status_code in (303, 307)

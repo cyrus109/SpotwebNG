@@ -179,8 +179,9 @@ clients want the base URL, others the full `/api`.
 
 ## Retrieving the full history
 
-By default a first run only fetches the most recent articles (*First-run backfill*, 20,000
-by default, up to 500,000). To index everything your Usenet provider still keeps — often
+By default a first run only fetches the most recent articles. *First-run backfill* takes a
+number and a unit: **articles** (20,000 by default) or **days** (for example, the last 30
+days of spots). To index everything your Usenet provider still keeps — often
 years of spots — either:
 
 - turn on **Retrieve the server's full history** in *Settings → Retrieval & retention*, so
@@ -218,6 +219,29 @@ Passwords, users, sessions and API keys are never exported. Import is additive: 
 already exist are skipped, nothing is overwritten, and bookmarks are only taken when the
 install has none. Cover images are not part of the file; spots that had one are fetched
 again in the background. Both are admin-only.
+
+## Sending spots to a downloader
+
+*Settings → Download client* adds a **Send** button to every spot page (administrators
+only). The app assembles the NZB itself, so the downloader never has to reach it:
+
+- **SABnzbd** — the NZB is uploaded through SABnzbd's API (`mode=addfile`) with your
+  category and priority. *Test connection* checks the URL and key and lists your
+  categories. The API key is stored but never shown again; leave the field blank to keep it.
+- **Black hole** — the NZB is written to a folder that your downloader watches. In Docker,
+  mount that folder into the container (for example `- /srv/blackhole:/blackhole`) and enter
+  the in-container path. Existing files are never overwritten.
+
+Plain **Download NZB** is always available. The SABnzbd URL is called from the server, so
+only point it at a service you trust.
+
+## Maintenance
+
+*Settings → Status & backup* has housekeeping commands: apply retention now, remove orphan
+comments and stale cached files, compact the database, reset the retrieval position (keeps
+your spots, the next run starts from the backfill window again), delete all comments, or
+delete everything and start from zero. The destructive ones ask you to type `DELETE`. Users,
+settings and API keys are never touched.
 
 ## Configuration
 

@@ -33,7 +33,7 @@ from .newznab import router as newznab_router
 from .retention import prune_old_spots, retention_cutoff
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
 from .seed import seed_if_empty
-from .settings_store import load_settings
+from .settings_store import backfill_plan, load_settings
 from .web import router as web_router
 
 logging.basicConfig(
@@ -58,12 +58,9 @@ async def _retrieve_loop() -> None:
                 prefs = await load_settings(session)
                 interval = prefs["retrieve_interval"] * 60
                 async with RETRIEVE_LOCK:
+                    plan = backfill_plan(prefs)
                     result = await retrieve_spots(
-                        session,
-                        max_backfill=prefs["retrieve_backfill"],
-                        retrieve_all=prefs["retrieve_all"],
-                        min_posted=retention_cutoff(prefs),
-                        max_age_days=prefs["retrieve_days"],
+                        session, **plan, min_posted=retention_cutoff(prefs)
                     )
                     logger.info("spot retrieval: %s", result)
                     if prefs["retrieve_comments"]:
@@ -72,10 +69,14 @@ async def _retrieve_loop() -> None:
                             cresult = await retrieve_comments(
                                 session,
                                 group=prefs["comment_group"],
-                                max_backfill=prefs["retrieve_backfill"],
+                                # comments are far fewer than spots, so an article
+                                # window stays a sensible start even in days mode
+                                max_backfill=500_000
+                                if prefs["retrieve_backfill_unit"] == "days"
+                                else plan["max_backfill"],
                                 retrieve_all=prefs["retrieve_all"],
                                 min_posted=retention_cutoff(prefs),
-                                max_age_days=prefs["retrieve_days"],
+                                max_age_days=plan["max_age_days"],
                             )
                             logger.info("comment retrieval: %s", cresult)
                         except Exception:

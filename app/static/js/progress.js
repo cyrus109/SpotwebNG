@@ -91,5 +91,31 @@
     });
   }
 
+  const maintBtn = document.getElementById("maintBtn");
+  if (maintBtn) {
+    maintBtn.addEventListener("click", async function () {
+      const action = document.getElementById("maintAction").value;
+      const msg = document.getElementById("maintMsg");
+      const form = new URLSearchParams({ action });
+      if (action === "wipe" || action === "wipe-comments") {
+        const typed = prompt("This cannot be undone. Type DELETE to continue.");
+        if (typed !== "DELETE") return;
+        form.set("confirm", typed);
+      } else if (!confirm("Run this maintenance action?")) {
+        return;
+      }
+      maintBtn.disabled = true;
+      msg.textContent = "Working…";
+      try {
+        const j = await (await fetch("/settings/maintenance", { method: "POST", body: form })).json();
+        msg.textContent = (j.ok ? "✓ " : "✗ ") + j.message;
+      } catch (e) {
+        msg.textContent = "✗ Request failed";
+      }
+      maintBtn.disabled = false;
+      schedule(500);
+    });
+  }
+
   tick();
 })();

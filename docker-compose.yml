@@ -10,6 +10,8 @@ services:
       - "7979:7979"
     volumes:
       - spotwebng-data:/data
+      # Black-hole folder for "Send to black hole" (Settings -> Download client):
+      # - /srv/blackhole:/blackhole
     environment:
       # Everything below is optional — the app generates its own API key and
       # reads the rest from the setup wizard.
