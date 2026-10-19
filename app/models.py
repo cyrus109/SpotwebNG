@@ -61,6 +61,12 @@ class Spot(Base):
     # Derived data (app/derived.py jobs fill rows stored before these existed).
     adult: Mapped[int] = mapped_column(Integer, default=-1, index=True)  # -1 unknown, 0/1
     title_key: Mapped[str] = mapped_column(String(255), default="", index=True)  # see titles.py
+    # Availability check (health.py): 0 unchecked, 1 complete, 2 partial, 3 dead.
+    health: Mapped[int] = mapped_column(Integer, default=0)
+    health_pct: Mapped[int] = mapped_column(Integer, default=-1)
+    health_checked_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
 
 class Spotter(Base):
@@ -118,6 +124,38 @@ class JobState(Base):
     processed: Mapped[int] = mapped_column(Integer, default=0)
     detail: Mapped[str] = mapped_column(String(255), default="")
     updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class Watch(Base):
+    """A saved search that acts on new matching spots (notify and/or send)."""
+
+    __tablename__ = "watches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), unique=True)
+    enabled: Mapped[int] = mapped_column(Integer, default=1)
+    query: Mapped[str] = mapped_column(String(255), default="")
+    tree: Mapped[str] = mapped_column(String(512), default="")  # Spotweb tree filter
+    min_size: Mapped[int] = mapped_column(BigInteger, default=0)  # bytes, 0 = no limit
+    max_size: Mapped[int] = mapped_column(BigInteger, default=0)
+    action: Mapped[str] = mapped_column(String(12), default="notify")  # notify | send
+    last_id: Mapped[int] = mapped_column(Integer, default=0)  # spots with a higher id are new
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hits: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WatchHit(Base):
+    """What a watch did with one spot (also stops it acting on the same spot twice)."""
+
+    __tablename__ = "watch_hits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    watch_id: Mapped[int] = mapped_column(Integer, index=True)
+    message_id: Mapped[str] = mapped_column(String(255), index=True)
+    title: Mapped[str] = mapped_column(String(512), default="")
+    outcome: Mapped[str] = mapped_column(String(120), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class ApiUser(Base):

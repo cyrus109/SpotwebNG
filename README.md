@@ -262,6 +262,28 @@ only). The app assembles the NZB itself, so the downloader never has to reach it
 Plain **Download NZB** is always available. The SABnzbd URL is called from the server, so
 only point it at a service you trust.
 
+## Availability check
+
+Old Usenet posts lose articles. The spot page has an **Availability** badge with a *check* button:
+the server assembles the spot's NZB and asks your news server (`STAT`, no article data is
+downloaded) about a sample of up to 30 of its real articles — first, last and random ones — over
+several connections. **✓ complete** means all sampled articles exist, **⚠ partial** that some are
+missing (par2 may repair it), **✗ dead** that fewer than half exist. Results are kept for a day.
+*Settings → Download client → Check availability before sending* can refuse dead spots (with a
+"send anyway" override), only warn, or skip the check.
+
+## Watchlists and notifications
+
+*Watchlists* (a link in Settings) are saved searches — words in the title, a category, a size
+range — that look at **new** spots after every retrieval (existing and merely old spots are
+ignored) and either **notify** you or **send** the NZB to your downloader, applying the
+availability check. Spots already downloaded, hidden adult content and blocked posters are skipped,
+and each watch acts on a spot only once. A live preview shows how many spots match today.
+
+*Settings → Notifications* supports a generic webhook (JSON), Discord, ntfy and Telegram. The
+addresses and tokens are stored encrypted and never shown again, and request URLs are kept out of
+the log. You can also be alerted when retrieval fails several times in a row (and when it recovers).
+
 ## Maintenance
 
 *Settings → Status & backup* has housekeeping commands: apply retention now, remove orphan

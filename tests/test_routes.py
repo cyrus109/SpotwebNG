@@ -797,3 +797,104 @@ async def test_sending_to_a_downloader_also_counts_and_wipe_keeps_the_history(
     assert (await _maint(c, "forget-downloads", "DELETE")).json()["ok"] is True
     async with factory() as s:
         assert (await s.execute(select(Download))).scalars().first() is None
+
+
+# --- watchlists and notifications -------------------------------------------
+
+
+async def test_watchlists_are_admin_only_and_can_be_created_paused_and_deleted(client):
+    from sqlalchemy import select
+
+    from app.models import Watch
+
+    c, factory = client
+    async with factory() as s:
+        await create_user(s, "boss", "pw-boss-12345", ADMIN)
+        await create_user(s, "view", "pw-view-12345", "viewer")
+    await c.post("/login", data={"username": "view", "password": "pw-view-12345"})
+    assert (await c.get("/watchlists")).status_code in (303, 307)
+    assert (await c.post("/watchlists", data={"name": "x"})).status_code in (303, 307)
+    await c.post("/logout")
+    await c.post("/login", data={"username": "boss", "password": "pw-boss-12345"})
+
+    assert "No watches yet" in (await c.get("/watchlists")).text
+    await c.post(
+        "/watchlists",
+        data={
+            "name": "Dune 4K",
+            "query": "dune",
+            "tree": "cat0_z0,junk,cat9_evil",
+            "min_gb": "1.5",
+            "action": "notify",
+        },
+    )
+    await c.post("/watchlists", data={"name": "Dune 4K", "query": "dup"})  # duplicate name ignored
+    await c.post("/watchlists", data={"name": "", "query": "empty name"})  # invalid ignored
+    await c.post("/watchlists", data={"name": "Bad action", "action": "rm -rf"})
+    async with factory() as s:
+        rows = (await s.execute(select(Watch))).scalars().all()
+    assert [(w.name, w.query, w.tree, w.min_size, w.action) for w in rows] == [
+        ("Dune 4K", "dune", "cat0_z0", int(1.5 * 1024**3), "notify")
+    ]
+    assert rows[0].last_id >= 8  # starts after the 8 existing spots: history is not news
+    page = (await c.get("/watchlists")).text
+    assert "Dune 4K" in page and "Pause" in page and "No notification channel" in page
+    await c.post(f"/watchlists/{rows[0].id}/toggle")
+    assert "paused" in (await c.get("/watchlists")).text
+    await c.post(f"/watchlists/{rows[0].id}/delete")
+    assert "No watches yet" in (await c.get("/watchlists")).text
+
+
+async def test_the_preview_counts_current_matches_and_respects_the_adult_filter(with_adult):
+    c, factory = with_adult
+    await _admin(c, factory)
+    result = (await c.get("/watchlists/preview", params={"q": "Spot"})).json()
+    assert result["count"] == 8 and len(result["titles"]) == 3
+    assert (await c.get("/watchlists/preview", params={"q": "Not Safe"})).json()["count"] == 0
+
+
+async def test_notification_secrets_are_encrypted_never_rendered_and_testable(client, monkeypatch):
+    import httpx
+    from sqlalchemy import select
+
+    c, factory = client
+    await _admin(c, factory)
+    await c.post(
+        "/settings",
+        data={
+            "notify_webhook_url": "https://hook.example/secret-token-123",
+            "public_url": "http://sw.local:7979",
+        },
+    )
+    page = (await c.get("/settings")).text
+    assert "secret-token-123" not in page and "Saved. Leave blank to keep." in page
+    async with factory() as s:
+        raw = (
+            (await s.execute(select(Setting).where(Setting.key == "notify_webhook_url")))
+            .scalar_one()
+            .value
+        )
+    assert raw.startswith("enc:") and "secret-token-123" not in raw
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        "app.notify.httpx.AsyncClient",
+        lambda **kw: real(transport=httpx.MockTransport(lambda r: httpx.Response(204)), **kw),
+    )
+    ok = (await c.post("/settings/notify/test")).json()
+    assert ok["ok"] is True and "webhook: sent" in ok["message"] and "secret" not in ok["message"]
+    await c.post(
+        "/settings", data={"notify_webhook_url": "javascript:alert(1)"}
+    )  # rejected, kept as before
+    again = (await c.post("/settings/notify/test")).json()
+    assert again["ok"] is True
+
+
+async def test_request_urls_with_tokens_are_never_logged(caplog):
+    """httpx logs full URLs at INFO; Telegram/webhook tokens live in them."""
+    import logging
+
+    import app.main  # noqa: F401  (configures logging)
+
+    assert logging.getLogger("httpx").level >= logging.WARNING
+    assert logging.getLogger("httpcore").level >= logging.WARNING

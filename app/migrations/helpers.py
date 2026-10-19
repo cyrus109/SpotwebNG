@@ -16,8 +16,7 @@ def _create_or_extend(name: str, *items, **kw) -> None:
     have = {c["name"] for c in insp.get_columns(name)}
     for item in items:
         if isinstance(item, sa.Column) and item.name not in have:
-            with op.batch_alter_table(name) as batch:
-                batch.add_column(item)
+            op.add_column(name, item)
 
 
 def _create_indexes(table: str, indexes: list[tuple[str, list[str], bool]]) -> None:
@@ -31,5 +30,6 @@ def _create_indexes(table: str, indexes: list[tuple[str, list[str], bool]]) -> N
 def add_column_if_missing(table: str, column: sa.Column) -> None:
     insp = sa.inspect(op.get_bind())
     if column.name not in {c["name"] for c in insp.get_columns(table)}:
-        with op.batch_alter_table(table) as batch:
-            batch.add_column(column)
+        # Plain ALTER TABLE ADD COLUMN, never batch mode: on SQLite batch rebuilds the whole
+        # table, which silently drops its triggers (the FTS5 search index depends on them).
+        op.add_column(table, column)

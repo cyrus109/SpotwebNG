@@ -45,6 +45,11 @@ def category_data() -> dict:
         return json.load(fh)
 
 
+def clean_tree(tree: str) -> str:
+    """Keep only well-formed tree tokens (what parse_tree would honour); drop the rest."""
+    return ",".join(t for t in (p.strip() for p in tree.split(",")) if _TOKEN.match(t))[:512]
+
+
 def parse_tree(tree: str) -> tuple[list[dict], list[dict]]:
     """Parse a tree string into (included groups, strong-NOT groups).
 

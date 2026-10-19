@@ -30,7 +30,16 @@ logger = logging.getLogger("spotwebng")
 PREFIX = "enc:"
 KEY_ENV = "SPOTWEBNG_SECRET_KEY"
 # Setting keys whose values are secrets. (settings_store's "secret" kinds must be listed here.)
-SECRET_KEYS = frozenset({"password", "sab_apikey"})
+SECRET_KEYS = frozenset(
+    {
+        "password",
+        "sab_apikey",
+        "notify_webhook_url",
+        "notify_discord_url",
+        "notify_ntfy_url",
+        "notify_telegram_token",
+    }
+)
 
 
 @lru_cache(maxsize=1)

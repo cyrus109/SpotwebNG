@@ -71,6 +71,23 @@
     });
   }
 
+  // --- notification test ------------------------------------------------
+  const nBtn = document.getElementById("notifyTest");
+  if (nBtn) {
+    nBtn.addEventListener("click", async () => {
+      const msg = document.getElementById("notifyTestMsg");
+      nBtn.disabled = true;
+      msg.textContent = "Sending…";
+      try {
+        const r = await (await fetch("/settings/notify/test", { method: "POST" })).json();
+        msg.textContent = (r.ok ? "✓ " : "✗ ") + (r.message || "");
+      } catch (e) {
+        msg.textContent = "✗ Request failed";
+      }
+      nBtn.disabled = false;
+    });
+  }
+
   // --- copy API key -----------------------------------------------------
   // navigator.clipboard only exists in a secure context — this app is served
   // over plain HTTP on a LAN, so fall back to a hidden textarea + execCommand.

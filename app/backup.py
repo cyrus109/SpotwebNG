@@ -29,7 +29,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .cache import invalidate
 from .comments import _MSGID_RE
-from .models import Comment, Download, Spot, Spotter, UsenetState
+from .filters import clean_tree
+from .models import Comment, Download, Spot, Spotter, UsenetState, Watch
 from .spotnet import safe_website
 from .spots import adult_flag
 
@@ -50,6 +51,7 @@ TABLES: dict[str, tuple[type, str]] = {
     "comments": (Comment, "message_id"),
     "downloads": (Download, "message_id"),
     "spotters": (Spotter, "spotter_id"),
+    "watches": (Watch, "name"),
     "usenet_state": (UsenetState, "infotype"),
 }
 
@@ -105,6 +107,9 @@ def _coerce_row(name: str, model: type, raw: Any) -> dict | None:
         if col.name not in raw:
             continue
         value, kind = raw[col.name], col.type.python_type
+        if value is None and col.nullable:
+            clean[col.name] = None  # an unset optional value (e.g. a timestamp never recorded)
+            continue
         try:
             if kind is datetime:
                 parsed = datetime.fromisoformat(str(value))
@@ -165,6 +170,14 @@ def _sanitize(name: str, row: dict) -> bool:
                 ok = False
             if not ok:
                 row["nzb_segments"] = ""
+    elif name == "watches":
+        if not re.fullmatch(r"[^\x00-\x1f]{1,80}", row.get("name", "")):
+            return False
+        row["last_id"] = -1  # spot ids differ per install: start from "now" at the next run
+        row["tree"] = clean_tree(row.get("tree", ""))
+        if row.get("action") not in ("notify", "send"):
+            row["action"] = "notify"
+        row["hits"] = 0
     elif name == "spotters":
         if not re.fullmatch(r"[A-Za-z0-9]{1,16}", row.get("spotter_id", "")):
             return False

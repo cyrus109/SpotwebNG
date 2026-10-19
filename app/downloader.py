@@ -117,12 +117,29 @@ async def send_to_blackhole(
     return {"ok": True, "message": f"Saved {filename}"}
 
 
-async def send_spot(session: AsyncSession, spot: Spot, prefs: dict[str, Any]) -> dict[str, Any]:
+async def send_spot(
+    session: AsyncSession, spot: Spot, prefs: dict[str, Any], force: bool = False
+) -> dict[str, Any]:
+    from .health import COMPLETE, DEAD, PARTIAL, check_spot
     from .newznab import _real_nzb  # assembles (and caches) the real NZB
 
     action = prefs["nzb_action"]
     if action not in ("sabnzbd", "blackhole"):
         return _fail("Sending is turned off (Settings → Download client)")
+    warning = ""
+    policy = prefs["send_health_policy"]
+    if policy != "off" and not force:
+        health = await check_spot(session, spot)
+        if health["health"] == DEAD and policy == "block-dead":
+            return {
+                "ok": False,
+                "blocked": True,
+                "message": f"Only {health['pct']}% of this spot's articles are still available",
+            }
+        if health["health"] == PARTIAL:
+            warning = f" (partial: {health['pct']}% of articles available)"
+        elif health["health"] not in (COMPLETE, PARTIAL, DEAD) and "error" in health:
+            warning = " (availability could not be checked)"
     nzb = await _real_nzb(session, spot)
     if not nzb:
         return _fail("This spot's NZB is not available (yet); try again in a moment")
@@ -133,4 +150,5 @@ async def send_spot(session: AsyncSession, spot: Spot, prefs: dict[str, Any]) ->
         result = await send_to_blackhole(prefs, spot.id, name, nzb)
     if result["ok"]:
         await record_download(session, spot.message_id, "send")
+        result["message"] += warning
     return result

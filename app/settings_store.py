@@ -39,6 +39,18 @@ SPEC: dict[str, tuple[Any, str]] = {
     "retention_type": ("fullonly", "str"),  # fullonly | everything
     # sending a spot's NZB to a downloader
     "nzb_action": ("download", "str"),  # download | sabnzbd | blackhole
+    "send_health_policy": ("block-dead", "str"),  # off | warn | block-dead
+    # notifications (URLs can embed tokens, so they are secrets)
+    "public_url": ("", "str"),  # this app's address, for links in notifications
+    "notify_webhook_url": ("", "secret"),
+    "notify_discord_url": ("", "secret"),
+    "notify_ntfy_url": ("", "secret"),
+    "notify_telegram_token": ("", "secret"),
+    "notify_telegram_chat": ("", "str"),
+    "notify_failure_after": (
+        3,
+        "int",
+    ),  # alert after this many failed retrievals in a row (0 = off)
     "sab_url": ("", "str"),
     "sab_apikey": ("", "secret"),  # never rendered back into a page
     "sab_category": ("", "str"),
@@ -65,6 +77,7 @@ CLAMPS = {
     "retention_days": (0, 3650),
     "retrieve_days": (0, 36500),
     "backup_keep": (0, 60),
+    "notify_failure_after": (0, 50),
     "enrich_older_than_days": (0, 36500),
     "sab_priority": (-100, 2),
 }
@@ -72,6 +85,7 @@ CLAMPS = {
 CHOICES = {
     "retrieve_backfill_unit": ("articles", "days"),
     "nzb_action": ("download", "sabnzbd", "blackhole"),
+    "send_health_policy": ("off", "warn", "block-dead"),
     "retention_type": ("fullonly", "everything"),
     "default_sort": ("new", "old", "size", "title"),
     "default_view": ("grid", "table"),
@@ -94,8 +108,10 @@ def _coerce(key: str, raw: str) -> Any:
     if kind == "bool":
         return str(raw).strip().lower() in ("1", "true", "on", "yes")
     text = _CONTROL.sub("", str(raw)).strip()
-    if key == "sab_url":  # an http(s) base URL, or nothing
+    if key in ("sab_url", "public_url"):  # an http(s) base URL, or nothing
         return text.rstrip("/") if re.fullmatch(r"https?://[^\s]+", text) else default
+    if key in ("notify_webhook_url", "notify_discord_url", "notify_ntfy_url"):
+        return text if (not text or re.fullmatch(r"https?://[^\s]+", text)) else default
     if key == "comment_group" and not re.match(r"^[A-Za-z0-9._+-]{1,128}$", text):
         return default  # it ends up in an NNTP command line
     allowed = CHOICES.get(key)
@@ -158,6 +174,8 @@ async def save_settings(session: AsyncSession, values: dict[str, str]) -> dict[s
         existing = await session.get(Setting, key)
         text = str(_coerce(key, raw))
         if kind == "secret":
+            if not text:
+                continue  # blank or rejected input never wipes a stored secret
             text = encrypt(text)
         if existing:
             existing.value = text

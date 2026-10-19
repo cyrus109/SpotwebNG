@@ -22,6 +22,13 @@
         {% elif spot.verified == 2 %}<span class="pill sig-bad" title="The poster signature did not verify: possibly forged">⚠ signature failed</span>{% endif %}
         {% if spotter_status == 'blocked' %}<span class="pill sig-bad">blocked</span>{% elif spotter_status == 'trusted' %}<span class="pill sig-ok">trusted</span>{% endif %}
       </span>
+      <span class="fact" id="health-fact"><b>Availability</b>
+        {% if spot.health == 1 %}<span class="pill sig-ok" id="health-pill">✓ complete</span>
+        {% elif spot.health == 2 %}<span class="pill" id="health-pill">⚠ partial ({{ spot.health_pct }}%)</span>
+        {% elif spot.health == 3 %}<span class="pill sig-bad" id="health-pill">✗ dead ({{ spot.health_pct }}%)</span>
+        {% else %}<span class="pill" id="health-pill">not checked</span>{% endif %}
+        <button class="linkish" type="button" id="btn-health" data-url="/spot/{{ spot.id }}/health">check</button>
+      </span>
       {% if downloaded %}<span class="fact ok"><b>✓ Downloaded</b> {{ downloaded.last_at.strftime('%Y-%m-%d %H:%M') }}{% if downloaded.count > 1 %} ({{ downloaded.count }}×){% endif %}</span>{% endif %}
     </div>
     {% if spot.description %}<div class="detail-desc">{{ spot.description }}</div>{% endif %}

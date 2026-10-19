@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Watchlists — {{ app_name }}{% endblock %}
+
+{% block rail %}
+<nav class="rail" id="rail" aria-label="Watchlists">
+  <div class="rail-scroll">
+    <div class="rail-sec">
+      <div class="rail-title">Watchlists</div>
+      <div class="rail-nav">
+        <a href="/settings" class="rail-link"><span class="rail-text">Settings</span></a>
+        <a href="/" class="rail-link"><span class="rail-text">← Back to browsing</span></a>
+      </div>
+    </div>
+  </div>
+</nav>
+{% endblock %}
+
+{% block content %}
+<div class="settings-wrap">
+  <section class="card" id="new-watch">
+    <div class="card-head"><div class="card-head-text">
+      <h2>New watch</h2>
+      <p class="card-sub">A watch looks at <b>new</b> spots after every retrieval (existing ones are ignored) and either notifies you or sends the NZB to your downloader. Already-downloaded spots, hidden adult content and blocked posters are skipped.</p>
+    </div></div>
+    <form method="post" action="/watchlists" class="watch-form" id="watchForm">
+      <div class="card-rows">
+        <div class="set-row"><div class="set-info"><label class="set-name" for="w-name">Name</label></div>
+          <div class="set-control"><input type="text" id="w-name" name="name" maxlength="80" required placeholder="Dune in 4K"></div></div>
+        <div class="set-row"><div class="set-info"><label class="set-name" for="w-query">Words in the title</label><span class="set-desc">Every word must appear (word starts). Leave empty to match by category only.</span></div>
+          <div class="set-control"><input type="text" id="w-query" name="query" maxlength="255" placeholder="dune 2160p"></div></div>
+        <div class="set-row"><div class="set-info"><label class="set-name" for="w-preset">Category</label></div>
+          <div class="set-control"><select id="w-preset" data-ui-select aria-label="Category preset">
+            {% for s in sections %}<option value="{{ s.tree }}">{{ s.label }}</option>{% endfor %}
+          </select><input type="hidden" id="w-tree" name="tree" value=""></div></div>
+        <div class="set-row"><div class="set-info"><span class="set-name">Size</span><span class="set-desc">GB, 0 = no limit</span></div>
+          <div class="set-control input-unit"><input type="number" min="0" step="0.1" name="min_gb" id="w-min" value="0"><span class="unit">to</span><input type="number" min="0" step="0.1" name="max_gb" id="w-max" value="0"><span class="unit">GB</span></div></div>
+        <div class="set-row"><div class="set-info"><label class="set-name" for="w-action">When something matches</label></div>
+          <div class="set-control"><select id="w-action" name="action" data-ui-select>
+            <option value="notify">Notify me</option>
+            <option value="send" {{ 'disabled' if not can_send }}>Send to the downloader{{ '' if can_send else ' (set up SABnzbd or a black hole first)' }}</option>
+          </select></div></div>
+        <div class="set-row"><div class="set-info"><span class="set-name">Right now</span><span class="set-desc" id="w-preview" role="status">Type something to preview matches.</span></div>
+          <div class="set-control"><button class="btn-glass btn-primary" type="submit">Add watch</button></div></div>
+      </div>
+    </form>
+  </section>
+
+  <section class="card" id="watches">
+    <div class="card-head"><div class="card-head-text">
+      <h2>Your watches</h2>
+      <p class="card-sub">{% if channels %}Notifications go to: {{ channels | join(', ') }}.{% else %}No notification channel is set up yet &mdash; matches are only recorded here. <a href="/settings#notifications">Set one up</a>.{% endif %}</p>
+    </div></div>
+    <ul class="keylist">
+      {% for w in watches %}
+      <li class="keyrow watch-row">
+        <div class="keyrow-main">
+          <span class="keyrow-name">{{ w.name }} {% if not w.enabled %}<span class="pill">paused</span>{% endif %}</span>
+          <span class="keyrow-used">
+            {{ w.action }} ·
+            {% if w.query %}“{{ w.query }}”{% else %}any title{% endif %}{% if w.tree %} · {{ w.tree }}{% endif %}
+            {% if w.min_size or w.max_size %} · {{ '%.1f' % (w.min_size / 1073741824) }}–{{ (('%.1f' % (w.max_size / 1073741824)) if w.max_size else '∞') }} GB{% endif %}
+            · {{ w.hits }} hit(s){% if w.last_run_at %} · checked {{ w.last_run_at.strftime('%d %b %H:%M') }}{% endif %}
+          </span>
+          {% for h in recent.get(w.id, []) %}<span class="keyrow-used">↳ {{ h.title }} — {{ h.outcome }}</span>{% endfor %}
+        </div>
+        <form method="post" action="/watchlists/{{ w.id }}/toggle"><button class="linkish" type="submit">{{ 'Pause' if w.enabled else 'Resume' }}</button></form>
+        <form method="post" action="/watchlists/{{ w.id }}/delete" onsubmit="return confirm('Delete this watch?')"><button class="linkish" type="submit">Delete</button></form>
+      </li>
+      {% else %}
+      <li class="keyrow"><span class="keyrow-used">No watches yet.</span></li>
+      {% endfor %}
+    </ul>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}<script src="/static/js/watchlists.js?v={{ asset_v('js/watchlists.js') }}"></script>{% endblock %}

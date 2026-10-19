@@ -35,11 +35,13 @@ from .csrf import PRE_SESSION_COOKIE
 from .db import SessionLocal, get_session, init_db
 from .jobs import run_jobs
 from .newznab import router as newznab_router
+from .notify import FailureTracker
 from .retention import prune_old_spots, retention_cutoff
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
 from .seed import seed_if_empty
 from .settings_store import backfill_plan, load_settings
 from .version import VERSION
+from .watch import run_watches
 from .web import router as web_router
 
 logging.basicConfig(
@@ -47,7 +49,12 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
 )
 logger = logging.getLogger("spotwebng")
+# httpx logs every request URL at INFO. Webhook, Discord and Telegram tokens live in those URLs
+# (and SABnzbd's address does too), so never let them reach the log.
+for _noisy in ("httpx", "httpcore"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 
+FAILURES = FailureTracker()
 RETRIEVE_INTERVAL = 15 * 60  # seconds between automatic retrievals
 ENRICH_INTERVAL = 20  # seconds between enrichment batches
 ENRICH_BATCH = 50
@@ -59,6 +66,7 @@ async def _retrieve_loop() -> None:
     in the same loop so an unattended install cannot fill its disk."""
     while True:
         interval = RETRIEVE_INTERVAL
+        prefs: dict | None = None
         try:
             async with SessionLocal() as session:
                 prefs = await load_settings(session)
@@ -87,14 +95,28 @@ async def _retrieve_loop() -> None:
                             logger.info("comment retrieval: %s", cresult)
                         except Exception:
                             logger.exception("comment retrieval failed")
+                await FAILURES.succeeded(prefs)
+                try:  # watchlists act on what this run stored; they must not fail the run
+                    watched = await run_watches(session)
+                    if watched["matched"]:
+                        logger.info("watchlists: %s", watched)
+                except Exception:
+                    logger.exception("watchlists failed")
                 await sweep_expired_sessions(session)
                 pruned = await prune_old_spots(session)
                 if pruned["deleted"] or pruned["stripped"]:
                     logger.info("retention: %s", pruned)
         except ValueError:
             logger.info("spot retrieval skipped: provider not configured yet")
-        except Exception:
+        except Exception as exc:
             logger.exception("spot retrieval failed")
+            try:
+                if prefs is None:
+                    async with SessionLocal() as session:
+                        prefs = await load_settings(session)
+                await FAILURES.failed(prefs, type(exc).__name__)
+            except Exception:
+                logger.exception("failure alert could not be sent")
         await asyncio.sleep(interval)
 
 
@@ -159,7 +181,7 @@ app.include_router(web_router)
 # authenticates with its own key, and the rest are needed to log in at all.
 OPEN_PREFIXES = ("/api", "/static", "/healthz", "/login")
 # Configuration surfaces — a viewer has no business here.
-ADMIN_PREFIXES = ("/settings", "/setup", "/retrieve")
+ADMIN_PREFIXES = ("/settings", "/setup", "/retrieve", "/watchlists")
 
 
 def is_open_path(path: str) -> bool:

@@ -84,6 +84,7 @@ SORTS: dict[str, Any] = {
     "old": Spot.posted_at.asc(),
     "size": Spot.size.desc(),
     "title": Spot.title.asc(),
+    "id": Spot.id.asc(),  # insertion order: what watchlists walk
 }
 
 
@@ -103,6 +104,7 @@ async def search_spots(
     offset: int = 0,
     limit: int = 100,
     after: tuple[datetime, int] | None = None,
+    min_id: int | None = None,
 ) -> tuple[list[Spot], int]:
     """Return (rows, total) for a search. Used by Newznab search/tvsearch/movie
     and by the web UI's Spotnet-style category tree filtering."""
@@ -112,6 +114,8 @@ async def search_spots(
     conds = [blocked_condition()]  # a blocked poster is blocked everywhere
     if hide_failed:
         conds.append(failed_condition())
+    if min_id is not None:
+        conds.append(Spot.id > min_id)
     if query:
         match = fts_match(query) if await fts_enabled(session) else None
         if match:
@@ -146,7 +150,18 @@ async def search_spots(
 
     # The total is expensive on millions of rows and barely changes between page views.
     count_key = "total:" + repr(
-        (query, categories, tree, imdb_id, min_size, max_size, since, exclude_adult, hide_failed)
+        (
+            query,
+            categories,
+            tree,
+            imdb_id,
+            min_size,
+            max_size,
+            since,
+            exclude_adult,
+            hide_failed,
+            min_id,
+        )
     )
 
     async def count() -> int:

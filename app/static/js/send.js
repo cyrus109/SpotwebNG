@@ -10,6 +10,23 @@
       else alert((await r.json()).message || "Failed");
     });
   });
+  const healthBtn = document.getElementById("btn-health");
+  if (healthBtn) {
+    healthBtn.addEventListener("click", async () => {
+      const pill = document.getElementById("health-pill");
+      pill.textContent = "checking…";
+      healthBtn.disabled = true;
+      try {
+        const r = await (await fetch(healthBtn.dataset.url, { method: "POST", body: new URLSearchParams({ force: "1" }) })).json();
+        const icon = { complete: "✓ complete", partial: "⚠ partial (" + r.pct + "%)", dead: "✗ dead (" + r.pct + "%)", unchecked: "not checked" }[r.label] || r.label;
+        pill.textContent = r.error ? "✗ " + r.error : icon;
+        pill.className = "pill " + (r.label === "complete" ? "sig-ok" : r.label === "dead" ? "sig-bad" : "");
+      } catch (e) {
+        pill.textContent = "✗ check failed";
+      }
+      healthBtn.disabled = false;
+    });
+  }
   const btn = document.getElementById("btn-send");
   if (!btn) return;
   const msg = document.getElementById("send-msg");
@@ -17,8 +34,13 @@
     btn.disabled = true;
     msg.textContent = "Sending…";
     try {
-      const r = await fetch(btn.dataset.url, { method: "POST" });
-      const j = await r.json();
+      let r = await fetch(btn.dataset.url, { method: "POST" });
+      let j = await r.json();
+      if (!j.ok && j.blocked && confirm(j.message + ". Send it anyway?")) {
+        msg.textContent = "Sending anyway…";
+        r = await fetch(btn.dataset.url, { method: "POST", body: new URLSearchParams({ force: "1" }) });
+        j = await r.json();
+      }
       msg.textContent = (j.ok ? "✓ " : "✗ ") + (j.message || "");
     } catch (e) {
       msg.textContent = "✗ Request failed";

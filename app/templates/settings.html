@@ -8,7 +8,7 @@
       <div class="rail-title">Settings</div>
       <div class="rail-nav">
         <a href="#all" class="rail-link" data-section="all"><span class="rail-text">All settings</span></a>
-        {% for key, label in [('usenet','Usenet provider'),('retrieval','Retrieval &amp; retention'),('status','Status &amp; backup'),('downloads','Download client'),('posters','Posters'),
+        {% for key, label in [('usenet','Usenet provider'),('retrieval','Retrieval &amp; retention'),('status','Status &amp; backup'),('downloads','Download client'),('posters','Posters'),('notifications','Notifications'),
                               ('display','Display'),('appearance','Appearance'),
                               ('api','API access'),('account','Your account'),('users','Users')] %}
         <a href="#{{ key }}" class="rail-link" data-section="{{ key }}"><span class="rail-text">{{ label | safe }}</span></a>
@@ -18,6 +18,7 @@
     <div class="rail-sec">
       <div class="rail-title">Library</div>
       <div class="rail-nav">
+        <a href="/watchlists" class="rail-link"><span class="rail-text">Watchlists →</span></a>
         <a href="/" class="rail-link"><span class="rail-text">← Back to browsing</span></a>
       </div>
     </div>
@@ -266,6 +267,19 @@
       </div>
       <div class="set-row">
         <div class="set-info">
+          <label class="set-name" for="send_health_policy">Check availability before sending</label>
+          <span class="set-desc">Ask the news server whether a spot's articles still exist (a quick sample, no download) before it is sent.</span>
+        </div>
+        <div class="set-control">
+          <select name="send_health_policy" id="send_health_policy" data-ui-select>
+            <option value="block-dead" {{ 'selected' if values.send_health_policy == 'block-dead' }}>Refuse dead spots (you can override)</option>
+            <option value="warn" {{ 'selected' if values.send_health_policy == 'warn' }}>Warn about partial / dead spots</option>
+            <option value="off" {{ 'selected' if values.send_health_policy == 'off' }}>Don't check</option>
+          </select>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-info">
           <label class="set-name" for="sab_url">SABnzbd URL</label>
           <span class="set-desc">For example http://sabnzbd:8080 &mdash; reachable from this server.</span>
         </div>
@@ -307,6 +321,40 @@
       <div class="set-row">
         <div class="set-info"><span class="set-name">Test SABnzbd</span><span class="set-desc" id="sabTestMsg">Uses the URL and key above (the saved key if left blank).</span></div>
         <div class="set-control"><button class="btn-glass" type="button" id="sabTest">Test connection</button></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card" id="notifications">
+    <div class="card-head"><div class="card-head-text">
+      <h2>Notifications</h2>
+      <p class="card-sub">Where watchlist matches and retrieval-failure alerts are sent. Addresses and tokens are stored encrypted and never shown again; leave a field blank to keep it.</p>
+    </div></div>
+    <div class="card-rows">
+      {% for key, label, ph in [('notify_webhook_url','Webhook URL','https://…  (receives JSON: title, text, url)'),('notify_discord_url','Discord webhook URL','https://discord.com/api/webhooks/…'),('notify_ntfy_url','ntfy topic URL','https://ntfy.sh/your-topic'),('notify_telegram_token','Telegram bot token','123456:ABC…')] %}
+      <div class="set-row">
+        <div class="set-info"><label class="set-name" for="{{ key }}">{{ label }}</label>
+          <span class="set-desc">{{ 'Saved. Leave blank to keep.' if values[key] else 'Not set.' }}</span></div>
+        <div class="set-control"><input type="password" name="{{ key }}" id="{{ key }}" value="" autocomplete="new-password" placeholder="{{ ph }}"></div>
+      </div>
+      {% endfor %}
+      <div class="set-row">
+        <div class="set-info"><label class="set-name" for="notify_telegram_chat">Telegram chat id</label></div>
+        <div class="set-control"><input type="text" name="notify_telegram_chat" id="notify_telegram_chat" value="{{ values.notify_telegram_chat }}" autocomplete="off"></div>
+      </div>
+      <div class="set-row">
+        <div class="set-info"><label class="set-name" for="public_url">This app's address</label>
+          <span class="set-desc">Used for links in notifications, e.g. http://192.168.1.10:7979</span></div>
+        <div class="set-control"><input type="url" name="public_url" id="public_url" value="{{ values.public_url }}" placeholder="http://host:7979"></div>
+      </div>
+      <div class="set-row">
+        <div class="set-info"><label class="set-name" for="notify_failure_after">Alert when retrieval fails</label>
+          <span class="set-desc">After this many failed runs in a row (0 = never). You also get one message when it recovers.</span></div>
+        <div class="set-control input-unit"><input type="number" min="0" max="50" name="notify_failure_after" id="notify_failure_after" value="{{ values.notify_failure_after }}"><span class="unit">runs</span></div>
+      </div>
+      <div class="set-row">
+        <div class="set-info"><span class="set-name">Test</span><span class="set-desc" id="notifyTestMsg">Sends a message with the <b>saved</b> settings.</span></div>
+        <div class="set-control"><button class="btn-glass" type="button" id="notifyTest">Send test</button></div>
       </div>
     </div>
   </section>

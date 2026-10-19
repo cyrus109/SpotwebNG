@@ -147,6 +147,15 @@ class NntpClient:
             rows.append(row)
         return rows
 
+    async def stat(self, message_id: str) -> bool | None:
+        """Does the server still have this article? None when the answer is inconclusive."""
+        reply = await self.command(f"STAT <{message_id.strip('<>')}>")
+        if reply.startswith("223"):
+            return True
+        if reply.startswith("430"):
+            return False
+        return None
+
     async def xhdr_message_id(self, article: int) -> str | None:
         try:
             lines = await self.multiline(f"XHDR MESSAGE-ID {article}", "221")

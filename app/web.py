@@ -22,7 +22,7 @@ from fastapi.responses import (
     StreamingResponse,
 )
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from . import spotters
@@ -60,15 +60,19 @@ from .facets import option_counts, section_counts, section_dimensions
 from .filters import (
     FILTER_SECTIONS,
     base_tree,
+    clean_tree,
     section_for,
     tree_targets_adult,
     visible_sections,
 )
+from .health import check_spot
 from .jobs import job_status
 from .jobs import rerun as jobs_rerun
 from .maintenance import ACTIONS, DESTRUCTIVE, run_maintenance
-from .models import ApiUser, Comment, Setting, Spot, User
+from .models import ApiUser, Comment, Setting, Spot, User, Watch, WatchHit
 from .nntp_check import check_nntp
+from .notify import channels as notify_channels
+from .notify import notify as send_notification
 from .progress import LIVE, history_percent, live_idle, live_set, load_status, save_status
 from .retention import retention_cutoff
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
@@ -76,6 +80,8 @@ from .secrets_store import SECRET_KEYS, all_settings, encrypt, public_settings
 from .settings_store import backfill_plan, load_settings, save_settings
 from .spots import get_spot, is_adult_spot, search_spots
 from .version import VERSION
+from .watch import ACTIONS as watch_actions
+from .watch import new_watch
 
 router = APIRouter(dependencies=[Depends(verify_csrf)])
 templates = Jinja2Templates(
@@ -295,9 +301,25 @@ async def detail(
     )
 
 
+@router.post("/spot/{spot_id}/health")
+async def spot_health(
+    spot_id: int, force: str = Form(""), session: AsyncSession = Depends(get_session)
+) -> JSONResponse:
+    """Check whether the spot's articles are still on the news server (cached for a day)."""
+    spot = await get_spot(session, spot_id)
+    prefs = await load_settings(session)
+    if spot is None or (prefs["hide_adult"] and is_adult_spot(spot)):
+        return JSONResponse({"ok": False, "message": "Not found"}, status_code=404)
+    result = await check_spot(session, spot, force=force == "1")
+    return JSONResponse({"ok": "error" not in result, **result})
+
+
 @router.post("/spot/{spot_id}/send")
 async def send_spot_route(
-    request: Request, spot_id: int, session: AsyncSession = Depends(get_session)
+    request: Request,
+    spot_id: int,
+    force: str = Form(""),
+    session: AsyncSession = Depends(get_session),
 ) -> JSONResponse:
     """Send a spot's NZB to SABnzbd or the black-hole folder (admins only)."""
     if not await is_admin(session, request.cookies.get(COOKIE)):
@@ -312,8 +334,141 @@ async def send_spot_route(
             spot = await get_spot(session, spot_id)
         except Exception:
             pass
-    result = await send_spot(session, spot, prefs)
+    result = await send_spot(session, spot, prefs, force=force == "1")
     return JSONResponse(result, status_code=200 if result["ok"] else 502)
+
+
+def _watch_values(
+    name: str, query: str, tree: str, min_gb: float, max_gb: float, action: str
+) -> dict | None:
+    name = re.sub(r"[\x00-\x1f]", "", name).strip()[:80]
+    if not name or action not in watch_actions:
+        return None
+    return {
+        "name": name,
+        "query": re.sub(r"[\x00-\x1f]", "", query).strip()[:255],
+        "tree": clean_tree(tree),
+        "min_size": int(max(min_gb, 0) * 1024**3),
+        "max_size": int(max(max_gb, 0) * 1024**3),
+        "action": action,
+    }
+
+
+@router.get("/watchlists", response_class=HTMLResponse)
+async def watchlists_page(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> HTMLResponse:
+    prefs = await load_settings(session)
+    watches = (await session.execute(select(Watch).order_by(Watch.name))).scalars().all()
+    recent: dict[int, list] = {}
+    for w in watches:
+        recent[w.id] = list(
+            (
+                await session.execute(
+                    select(WatchHit)
+                    .where(WatchHit.watch_id == w.id)
+                    .order_by(WatchHit.id.desc())
+                    .limit(3)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return templates.TemplateResponse(
+        request,
+        "watchlists.html",
+        {
+            "watches": watches,
+            "recent": recent,
+            "sections": [
+                s for s in FILTER_SECTIONS if not (prefs["hide_adult"] and s["key"] == "erotica")
+            ],
+            "channels": notify_channels(prefs),
+            "can_send": prefs["nzb_action"] in ("sabnzbd", "blackhole"),
+            "app_name": get_settings().app_name,
+            "theme": prefs["theme"],
+        },
+    )
+
+
+@router.post("/watchlists")
+async def watchlists_create(
+    name: str = Form(""),
+    query: str = Form(""),
+    tree: str = Form(""),
+    min_gb: float = Form(0),
+    max_gb: float = Form(0),
+    action: str = Form("notify"),
+    session: AsyncSession = Depends(get_session),
+) -> RedirectResponse:
+    values = _watch_values(name, query, tree, min_gb, max_gb, action)
+    taken = (
+        values
+        and (await session.execute(select(Watch.id).where(Watch.name == values["name"]))).first()
+    )
+    if values and not taken:
+        await new_watch(session, **values)
+    return RedirectResponse("/watchlists", status_code=303)
+
+
+@router.post("/watchlists/{watch_id}/toggle")
+async def watchlists_toggle(
+    watch_id: int, session: AsyncSession = Depends(get_session)
+) -> RedirectResponse:
+    row = await session.get(Watch, watch_id)
+    if row is not None:
+        row.enabled = 0 if row.enabled else 1
+        await session.commit()
+    return RedirectResponse("/watchlists", status_code=303)
+
+
+@router.post("/watchlists/{watch_id}/delete")
+async def watchlists_delete(
+    watch_id: int, session: AsyncSession = Depends(get_session)
+) -> RedirectResponse:
+    row = await session.get(Watch, watch_id)
+    if row is not None:
+        await session.execute(delete(WatchHit).where(WatchHit.watch_id == watch_id))
+        await session.delete(row)
+        await session.commit()
+    return RedirectResponse("/watchlists", status_code=303)
+
+
+@router.get("/watchlists/preview")
+async def watchlists_preview(
+    q: str = "",
+    tree: str = "",
+    min_gb: float = 0,
+    max_gb: float = 0,
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    """How many spots a watch with these rules would match today (it only acts on new ones)."""
+    prefs = await load_settings(session)
+    rows, total = await search_spots(
+        session,
+        query=q.strip()[:255] or None,
+        tree=clean_tree(tree) or None,
+        min_size=int(max(min_gb, 0) * 1024**3) or None,
+        max_size=int(max(max_gb, 0) * 1024**3) or None,
+        exclude_adult=bool(prefs["hide_adult"]),
+        hide_failed=bool(prefs["hide_failed_signatures"]),
+        limit=3,
+    )
+    return JSONResponse({"count": total, "titles": [r.title[:60] for r in rows]})
+
+
+@router.post("/settings/notify/test")
+async def notify_test(session: AsyncSession = Depends(get_session)) -> JSONResponse:
+    """Send a test message to every configured channel (saved settings)."""
+    prefs = await load_settings(session)
+    if not notify_channels(prefs):
+        return JSONResponse({"ok": False, "message": "No notification channel is configured"})
+    results = await send_notification(
+        prefs, "SpotwebNG test", "Notifications are working.", prefs["public_url"]
+    )
+    ok = all(r["ok"] for r in results.values())
+    detail = ", ".join(f"{name}: {r['message']}" for name, r in results.items())
+    return JSONResponse({"ok": ok, "message": detail})
 
 
 @router.post("/spotter/{spotter_id}/status")

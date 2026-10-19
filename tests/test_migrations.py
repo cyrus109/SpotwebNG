@@ -164,3 +164,32 @@ async def test_healthz_reports_version_and_schema():
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         body = (await c.get("/healthz")).json()
     assert body["version"] == VERSION and body["schema"] == "0002"
+
+
+async def test_adding_columns_never_drops_the_search_index_triggers(tmp_path, data_dir):
+    """SQLite batch mode rebuilds the table and takes its triggers with it; ours must not."""
+    engine = _engine(tmp_path)
+    try:
+        await migrate.upgrade_database(engine, target="0004")  # FTS table + insert trigger exist
+        async with engine.connect() as conn:
+            before = {
+                r[0]
+                for r in await conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='trigger'")
+                )
+            }
+        assert "spots_fts_ai" in before
+        await migrate.upgrade_database(engine)  # later revisions add columns to spots
+        async with engine.connect() as conn:
+            after = {
+                r[0]
+                for r in await conn.execute(
+                    text("SELECT name FROM sqlite_master WHERE type='trigger'")
+                )
+            }
+            cols = {
+                c["name"] for c in await conn.run_sync(lambda c: inspect(c).get_columns("spots"))
+            }
+        assert "spots_fts_ai" in after and "health" in cols
+    finally:
+        await engine.dispose()
