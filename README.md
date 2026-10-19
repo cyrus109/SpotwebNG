@@ -180,9 +180,21 @@ clients want the base URL, others the full `/api`.
 - **Comments** — read-only. Comment headers are indexed from the comments newsgroup
   (*Settings → Index comments*; the group name is configurable, default `free.usenet`) and
   linked to their spot through their own message-id. The text of a comment loads the first
-  time you open the spot. Comment text is untrusted: it is escaped, size-capped and shown as
-  *unverified*, because Spotnet signatures are not checked yet.
+  time you open the spot. Comment text is untrusted: it is escaped and size-capped, and its signature
+  is checked when it loads (see *Signatures and posters*).
 - **Full history** — see below.
+- **Search and speed** — on SQLite, a full-text (FTS5) index makes search word-prefix based and fast
+  (*silo s03e05* finds *Silo.S03E05.Memory*); on PostgreSQL a trigram index does the same job. Counts and
+  filter facets are cached for a minute, and the *Next →* button pages by cursor instead of OFFSET, so page
+  5,000 costs the same as page 1. The history walk and cover enrichment use several NNTP connections in
+  parallel (the *connections* value from setup, at most 8), and *Enrich only recent spots* leaves old spots to
+  be enriched when you open them.
+- **Upgrades without re-downloading** — the database schema is migrated automatically at start-up (with a
+  safety copy first), and anything computable from stored data (adult flag, search index, duplicate keys,
+  IMDb ids, signature checks) is filled in by background jobs shown in the Status card. See
+  [docs/DEPLOY.md](docs/DEPLOY.md) and [docs/PLAN-v0.3.md](docs/PLAN-v0.3.md).
+- **Credentials at rest** — the Usenet password and every API key or token you enter are stored encrypted,
+  with a key kept outside the database (`SPOTWEBNG_SECRET_KEY` or `<data>/secret.key`). Keep a copy of it.
 
 ## Retrieving the full history
 
@@ -226,6 +238,15 @@ Passwords, users, sessions and API keys are never exported. Import is additive: 
 already exist are skipped, nothing is overwritten, and bookmarks are only taken when the
 install has none. Cover images are not part of the file; spots that had one are fetched
 again in the background. Both are admin-only.
+
+**Storage** — the same card shows the database, covers, NZB cache and backups sizes, the free space on
+the data volume, and an estimate of how big the next export will be (a compressed sample scaled by row
+count, typically within a few tens of percent). It turns red when the free space cannot comfortably hold
+the backups you keep.
+
+**Automatic backups** — *Settings → Automatic backups* keeps the newest N daily exports (default 3, 0 = off)
+in `<data>/backups`; *Back up now* makes one on demand. Before a schema upgrade a SQLite copy is also saved
+there, so a bad release can be rolled back.
 
 ## Signatures and posters
 
@@ -330,11 +351,17 @@ retrieval starts from the normal window and skips what you already have.
 
 ## Maintenance
 
-*Settings → Status & backup* has housekeeping commands: apply retention now, remove orphan
-comments and stale cached files, compact the database, reset the retrieval position (keeps
-your spots, the next run starts from the backfill window again), delete all comments, or
-delete everything and start from zero. The destructive ones ask you to type `DELETE`. Users,
-settings and API keys are never touched.
+*Settings → Status & backup* has housekeeping commands: back up now, apply retention now, remove orphan
+comments and stale cached files, compact the database, rebuild derived data (search index, flags),
+reset the retrieval position (keeps your spots, the next run starts from the backfill window again),
+forget which spots were downloaded, delete all comments, or delete everything and start from zero
+(download history is kept). The destructive ones ask you to type `DELETE`. Users, settings and API keys
+are never touched.
+
+**Compact the database** runs SQLite's `VACUUM`: it copies the live data into a fresh file and swaps it
+in, so the file shrinks after large deletes (SQLite otherwise keeps freed space inside the file). It needs
+free disk space about equal to the database size while it runs, and retrievals and imports wait until it is
+done. On PostgreSQL it runs a plain `VACUUM`, which makes space reusable but does not shrink the files.
 
 ## Security notes
 
@@ -356,13 +383,20 @@ for deployments:
 | `SEED_DEMO_DATA` | `true` | demo spots on first boot so the UI is not empty |
 | `APP_NAME` | `SpotwebNG` | shown in the UI and in Newznab caps |
 
-`SPOTWEBNG_DATA` sets where cover art and NZBs are written; the Docker image points it at
-the volume.
+Two variables use the `SPOTWEBNG_` prefix: `SPOTWEBNG_DATA` sets where cover art, NZBs, backups and the
+secret key are written (the Docker image points it at the volume), and `SPOTWEBNG_SECRET_KEY` supplies the
+encryption key for stored credentials instead of `<data>/secret.key` (a Fernet key; see
+[docs/DEPLOY.md](docs/DEPLOY.md)).
 
 ## Status
 
-Working today: retrieval, enrichment, filtering, the Newznab API, accounts and retention.
-Not yet: posting comments, signature verification, reports groups, saved filters, per-user watchlists.
+Working today: retrieval and the full-history walk, enrichment, filtering and search, the Newznab API,
+accounts and roles, retention, read-only comments, signature verification with poster blocking, spot
+availability checks, sending to SABnzbd or a black-hole folder, watchlists with notifications, Radarr/Sonarr
+integration, backups with import/export, importing a classic Spotweb database, statistics, and an installable
+web app.
+Not yet: posting comments, the reports group, per-user watchlists and download history (watchlists and
+history are shared by all administrators), and OIDC/SSO.
 
 Contributions welcome. Tests run with `pytest`; `ruff` and `mypy` gate every commit.
 
