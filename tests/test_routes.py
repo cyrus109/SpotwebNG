@@ -529,8 +529,19 @@ async def test_status_and_export_are_admin_only(client):
     assert (await c.get("/settings")).text.count("Status &amp; backup") >= 1
 
 
-async def test_import_route_runs_in_the_background_and_reports(client):
+async def _wait_for_background() -> None:
+    """Wait for import tasks without touching the (single, shared) in-memory connection."""
     import asyncio
+
+    from app import web
+
+    for _ in range(200):
+        if not web._background:
+            return
+        await asyncio.sleep(0.05)
+
+
+async def test_import_route_runs_in_the_background_and_reports(client):
 
     c, factory = client
     await _admin(c, factory)
@@ -539,20 +550,14 @@ async def test_import_route_runs_in_the_background_and_reports(client):
         "/settings/import", files={"file": ("backup.jsonl.gz", exported, "application/gzip")}
     )
     assert resp.json() == {"ok": True, "started": True}
-    for _ in range(100):
-        status = (await c.get("/retrieve/status")).json()["status"]
-        if "last_import" in status:
-            break
-        await asyncio.sleep(0.05)
+    await _wait_for_background()
+    status = (await c.get("/retrieve/status")).json()["status"]
     assert status["last_import"]["ok"] is True
     assert status["last_import"]["added"] == {}  # everything was already here
     bad = await c.post("/settings/import", files={"file": ("x.gz", b"junk", "application/gzip")})
     assert bad.json()["ok"] is True  # accepted, then reported as failed
-    for _ in range(100):
-        status = (await c.get("/retrieve/status")).json()["status"]
-        if status["last_import"].get("ok") is False:
-            break
-        await asyncio.sleep(0.05)
+    await _wait_for_background()
+    status = (await c.get("/retrieve/status")).json()["status"]
     assert status["last_import"]["ok"] is False
 
 

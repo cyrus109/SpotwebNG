@@ -2,15 +2,17 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import Integer, and_, func, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .cache import cached
 from .categories import expand_categories
 from .filters import tree_conditions
-from .models import Spot
+from .models import Setting, Spot
 from .spotters import blocked_condition, failed_condition
 
 # Spotnet files erotica under the z3 genre. Most of it also lands in the 6xxx
@@ -48,6 +50,35 @@ def is_adult_spot(spot: Spot) -> bool:
     return "z3|" in (spot.subcat_z or "")
 
 
+_FTS_TOKEN = re.compile(r"[0-9A-Za-zÀ-ÿ]+")
+
+
+def fts_match(query: str) -> str | None:
+    """An FTS5 MATCH expression for a free-text query: every word must start a word in the
+    title or description. None when a word is too short to index sensibly (use LIKE then)."""
+    parts = []
+    for term in query.split():
+        tokens = _FTS_TOKEN.findall(term)
+        if not tokens:
+            continue
+        if any(len(t) < 2 for t in tokens):
+            return None
+        parts.extend(f'"{t}"*' for t in tokens)
+    return " AND ".join(parts) or None
+
+
+async def fts_enabled(session: AsyncSession) -> bool:
+    """True once the SQLite FTS5 index has been built (see derived.py)."""
+
+    async def check() -> bool:
+        if session.bind.dialect.name != "sqlite":
+            return False
+        flag = await session.get(Setting, "fts_ready")
+        return flag is not None and flag.value == "1"
+
+    return await cached("fts-ready", 30, check)
+
+
 SORTS: dict[str, Any] = {
     "new": Spot.posted_at.desc(),
     "old": Spot.posted_at.asc(),
@@ -71,6 +102,7 @@ async def search_spots(
     sort: str = "new",
     offset: int = 0,
     limit: int = 100,
+    after: tuple[datetime, int] | None = None,
 ) -> tuple[list[Spot], int]:
     """Return (rows, total) for a search. Used by Newznab search/tvsearch/movie
     and by the web UI's Spotnet-style category tree filtering."""
@@ -81,12 +113,18 @@ async def search_spots(
     if hide_failed:
         conds.append(failed_condition())
     if query:
-        # Match every word independently. Release titles are dot-separated
-        # ("Silo.S03E05.Memory") while clients send spaces ("Silo S03E05"), so a
-        # single contiguous LIKE would never match.
-        for term in query.split():
-            like = f"%{term}%"
-            conds.append(or_(Spot.title.ilike(like), Spot.description.ilike(like)))
+        match = fts_match(query) if await fts_enabled(session) else None
+        if match:
+            # Indexed word-prefix search: "silo s03e05" finds "Silo.S03E05.Memory".
+            fts = text("SELECT rowid FROM spots_fts WHERE spots_fts MATCH :m").bindparams(m=match)
+            conds.append(Spot.id.in_(fts.columns(rowid=Integer)))
+        else:
+            # Match every word independently. Release titles are dot-separated
+            # ("Silo.S03E05.Memory") while clients send spaces ("Silo S03E05"), so a
+            # single contiguous LIKE would never match.
+            for term in query.split():
+                like = f"%{term}%"
+                conds.append(or_(Spot.title.ilike(like), Spot.description.ilike(like)))
     if imdb_id:
         conds.append(Spot.imdb_id == imdb_id.lstrip("t"))
     if categories:
@@ -106,7 +144,22 @@ async def search_spots(
         stmt = stmt.where(c)
         count_stmt = count_stmt.where(c)
 
-    total = (await session.execute(count_stmt)).scalar_one()
+    # The total is expensive on millions of rows and barely changes between page views.
+    count_key = "total:" + repr(
+        (query, categories, tree, imdb_id, min_size, max_size, since, exclude_adult, hide_failed)
+    )
+
+    async def count() -> int:
+        return (await session.execute(count_stmt)).scalar_one()
+
+    total = await cached(count_key, 60, count)
+    if after is not None and sort in ("new", "old"):
+        # Keyset paging: continue strictly after the last row of the previous page. No
+        # OFFSET, so page 5,000 costs the same as page 1.
+        ts, last_id = after
+        ahead = Spot.posted_at < ts if sort == "new" else Spot.posted_at > ts
+        stmt = stmt.where(or_(ahead, and_(Spot.posted_at == ts, Spot.id < last_id)))
+        offset = 0
     # min() alone let limit=-1 through, which SQLite reads as "no limit".
     safe_limit = max(1, min(limit, 200))
     safe_offset = max(0, offset)

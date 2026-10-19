@@ -65,6 +65,7 @@ from .filters import (
     visible_sections,
 )
 from .jobs import job_status
+from .jobs import rerun as jobs_rerun
 from .maintenance import ACTIONS, DESTRUCTIVE, run_maintenance
 from .models import ApiUser, Comment, Setting, Spot, User
 from .nntp_check import check_nntp
@@ -106,6 +107,16 @@ async def _theme(session: AsyncSession) -> str:
     return (await load_settings(session))["theme"]
 
 
+def _parse_cursor(raw: str) -> tuple[datetime, int] | None:
+    """'2026-07-01T10:00:00+00:00_123' -> (datetime, 123); None when absent or malformed."""
+    stamp, _, row_id = raw.rpartition("_")
+    try:
+        parsed = datetime.fromisoformat(stamp)
+        return (parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)), int(row_id)
+    except ValueError:
+        return None
+
+
 @router.get("/", response_class=HTMLResponse)
 async def home(
     request: Request,
@@ -118,6 +129,7 @@ async def home(
     sort: str = Query(""),
     view: str = Query(""),
     page: int = Query(1),
+    after: str = Query(""),
     session: AsyncSession = Depends(get_session),
 ) -> Response:
     # First-run: if no provider configured, send to the setup wizard.
@@ -141,7 +153,8 @@ async def home(
     if age:
         hours = {"24h": 24, "3d": 72, "1w": 168, "1m": 720}.get(age)
         if hours:
-            since = datetime.now(UTC) - timedelta(hours=hours)
+            now = datetime.now(UTC).replace(second=0, microsecond=0)
+            since = now - timedelta(minutes=now.minute % 5, hours=hours)  # 5-min buckets: cacheable
     rows, total = await search_spots(
         session,
         query=q or None,
@@ -154,6 +167,13 @@ async def home(
         sort=sort,
         offset=(max(page, 1) - 1) * prefs["per_page"],
         limit=prefs["per_page"],
+        after=_parse_cursor(after),
+    )
+    last = rows[-1] if rows else None
+    next_cursor = (
+        f"{last.posted_at.isoformat()}_{last.id}"
+        if last and sort in ("new", "old") and len(rows) == prefs["per_page"]
+        else ""
     )
     return templates.TemplateResponse(
         request,
@@ -185,6 +205,8 @@ async def home(
             "icons": RAIL_ICONS,
             "view": view if view in ("grid", "table") else "grid",
             "page": max(page, 1),
+            "next_cursor": next_cursor,
+            "cursor_mode": _parse_cursor(after) is not None,
             "per_page": prefs["per_page"],
             "pages": max(1, -(-total // prefs["per_page"])),
             "categories": CATEGORY_NAMES,
@@ -484,6 +506,7 @@ async def _import_run(factory, path: str) -> None:
                     factory, path, on_progress=lambda pct, msg: live_set(percent=pct, detail=msg)
                 )
                 outcome = {"ok": True, **result}
+                await jobs_rerun(factory, "verify-signatures")  # imported rows start unverified
             except ValueError as exc:
                 outcome = {"ok": False, "error": str(exc)}
             except Exception:

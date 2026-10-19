@@ -14,6 +14,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .autobackup import make_backup
+from .cache import invalidate
 from .config import IMAGES_DIR, NZB_DIR
 from .jobs import reset_jobs, run_jobs
 from .models import Comment, Download, Setting, Spot, UsenetState
@@ -56,6 +57,13 @@ def _unlink_dir(directory: Path, keep_ids: set[int] | None) -> int:
 async def run_maintenance(session: AsyncSession, action: str) -> str:
     """Run one action and return a human-readable result. Raises ValueError for
     an unknown action."""
+    try:
+        return await _run(session, action)
+    finally:
+        invalidate()  # any action may change what counts and facets show
+
+
+async def _run(session: AsyncSession, action: str) -> str:
     if action == "prune":
         result = await prune_old_spots(session)
         if result["cutoff"] is None:

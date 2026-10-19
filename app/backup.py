@@ -27,9 +27,11 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from .cache import invalidate
 from .comments import _MSGID_RE
 from .models import Comment, Download, Spot, Spotter, UsenetState
 from .spotnet import safe_website
+from .spots import adult_flag
 
 FORMAT = "spotwebng-export"
 VERSION = 1
@@ -136,6 +138,11 @@ def _sanitize(name: str, row: dict) -> bool:
     if name == "spots":
         if not _ID_RE.match(row.get("message_id", "")):
             return False
+        # Derived security data is never taken from a file: the content filter and the poster
+        # identity are recomputed locally (adult now, signatures by the verify job from the
+        # raw header), so a hostile file cannot unhide adult spots or claim a verified poster.
+        row["adult"] = adult_flag(row.get("category", 0), row.get("subcat_z", ""))
+        row["verified"], row["spotter_id"], row["keyid"] = 0, "", -1
         if row.get("nzb_ref") and not _ID_RE.match(row["nzb_ref"]):
             row["nzb_ref"] = ""
         if "website" in row:
@@ -167,6 +174,7 @@ def _sanitize(name: str, row: dict) -> bool:
         if not _ID_RE.match(row.get("message_id", "")):
             return False
     elif name == "comments":
+        row["verified"], row["spotter_id"] = 0, ""  # re-checked when the article is read again
         if not _MSGID_RE.match(row.get("message_id", "")):
             return False
         if not _ID_RE.match(row.get("spot_message_id", "")):
@@ -265,6 +273,7 @@ async def import_file(
                 # Bookmarks last, and only where this install has none: they must
                 # match the data, and a local bookmark already does.
                 await _flush(session, "usenet_state", batch["usenet_state"], result)
+                invalidate()
         except (OSError, EOFError, zlib.error) as exc:
             raise ValueError(f"Export file is damaged: {exc}") from exc
     return result

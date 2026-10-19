@@ -88,9 +88,17 @@
 {% if pages > 1 %}
 <nav class="pager" aria-label="Pages">
   {% set qs = 'q=' ~ q ~ '&tree=' ~ tree ~ '&sort=' ~ sort ~ '&age=' ~ age %}
-  {% if page > 1 %}<a class="btn-glass" href="/?{{ qs }}&page={{ page - 1 }}">← Previous</a>{% endif %}
-  <span class="pager-info">Page {{ page }} of {{ '{:,}'.format(pages) }}</span>
-  {% if page < pages %}<a class="btn-glass" href="/?{{ qs }}&page={{ page + 1 }}">Next →</a>{% endif %}
+  {% if cursor_mode %}
+    <a class="btn-glass" href="/?{{ qs }}">⇤ First page</a>
+    <span class="pager-info">Further results</span>
+    {% if next_cursor %}<a class="btn-glass" href="/?{{ qs }}&after={{ next_cursor }}">Next →</a>{% endif %}
+  {% else %}
+    {% if page > 1 %}<a class="btn-glass" href="/?{{ qs }}&page={{ page - 1 }}">← Previous</a>{% endif %}
+    <span class="pager-info">Page {{ page }} of {{ '{:,}'.format(pages) }}</span>
+    {# "Next" continues by cursor (no OFFSET), so it stays fast however deep you go #}
+    {% if next_cursor %}<a class="btn-glass" href="/?{{ qs }}&after={{ next_cursor }}">Next →</a>
+    {% elif page < pages %}<a class="btn-glass" href="/?{{ qs }}&page={{ page + 1 }}">Next →</a>{% endif %}
+  {% endif %}
 </nav>
 {% endif %}
 

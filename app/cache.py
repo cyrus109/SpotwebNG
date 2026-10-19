@@ -11,9 +11,12 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 _store: dict[str, tuple[float, Any]] = {}
+enabled = True  # tests switch it off so state changes are always visible
 
 
 async def cached(key: str, ttl: float, factory: Callable[[], Awaitable[Any]]) -> Any:
+    if not enabled:
+        return await factory()
     now = time.monotonic()
     hit = _store.get(key)
     if hit and hit[0] > now:

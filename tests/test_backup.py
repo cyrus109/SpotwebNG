@@ -93,11 +93,8 @@ async def test_round_trip_into_a_fresh_install(source, tmp_path):
             sp = (await s.execute(select(Spotter))).scalar_one()
             assert (sp.spotter_id, sp.status) == ("SPAMID", "blocked")
             signed = (await s.execute(select(Spot).where(Spot.message_id == "<s3@x>"))).scalar_one()
-            assert (signed.verified, signed.spotter_id, signed.from_hdr) == (
-                1,
-                "SID123",
-                "Nick <k@h>",
-            )
+            # derived security data is recomputed locally, never trusted from the file
+            assert (signed.verified, signed.spotter_id, signed.from_hdr) == (0, "", "Nick <k@h>")
             state = await s.get(UsenetState, "spots")
             assert state.cur_article == 500  # no need to re-read the group
             cover_lost = (
@@ -270,3 +267,33 @@ async def test_nntp_commands_cannot_carry_line_breaks():
     client.writer = object()  # never reached: the guard fires first
     with pytest.raises(NntpError):
         await client.command("BODY <a@x>\r\nQUIT")
+
+
+async def test_a_hostile_file_cannot_unhide_adult_spots_or_claim_a_verified_poster(tmp_path):
+    target, engine = await _factory()
+    try:
+        lines = [
+            {"format": "spotwebng-export", "version": 1},
+            {
+                "t": "spots",
+                "r": {
+                    "message_id": "<adult@x>",
+                    "title": "Adult",
+                    "posted_at": NOW.isoformat(),
+                    "category": 6040,
+                    "subcat_z": "z3|",
+                    "adult": 0,  # claims to be safe
+                    "verified": 1,  # claims a verified poster...
+                    "spotter_id": "VICTIM123",  # ...who is someone else
+                    "keyid": 7,
+                },
+            },
+        ]
+        path = tmp_path / "evil.gz"
+        path.write_bytes(gzip.compress(("\n".join(json.dumps(x) for x in lines) + "\n").encode()))
+        await import_file(target, str(path))
+        async with target() as s:
+            spot = (await s.execute(select(Spot))).scalar_one()
+        assert (spot.adult, spot.verified, spot.spotter_id, spot.keyid) == (1, 0, "", -1)
+    finally:
+        await engine.dispose()

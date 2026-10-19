@@ -20,6 +20,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .cache import invalidate
 from .models import Spot, UsenetState
 from .progress import history_percent, live_idle, live_set, load_status, save_status
 from .secrets_store import all_settings
@@ -255,6 +256,7 @@ async def _store_rows(
                 known.subcat_d = pack_subcats(s.subcats.get("d", []), 128)
                 known.subcat_z = pack_subcats(s.subcats.get("z", []), 32)
                 known.spot_category = s.category
+                known.adult = adult_flag(known.category, known.subcat_z)  # never leave it stale
                 touched = True
             backfilled += touched
             continue
@@ -426,6 +428,7 @@ async def retrieve_spots(
 
         await save_status(session, floor=floor.cur_article, last_run=datetime.now(UTC).isoformat())
         await session.commit()
+        invalidate()  # cached counts/facets would otherwise lag behind the new rows
         return {
             "added": added,
             "backfilled": backfilled,

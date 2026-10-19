@@ -20,6 +20,7 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from .cache import invalidate
 from .models import JobState
 
 logger = logging.getLogger("spotwebng")
@@ -92,6 +93,18 @@ async def run_jobs(factory: async_sessionmaker[AsyncSession], pause: float = 0.0
                         await session.commit()
     finally:
         _running = False
+        invalidate()
+
+
+async def rerun(factory: async_sessionmaker[AsyncSession], name: str) -> None:
+    """Forget one job's progress and run it again (e.g. after an import brought in rows
+    whose derived values must be recomputed locally)."""
+    async with factory() as session:
+        state = await _state(session, name)
+        if state is not None:
+            await session.delete(state)
+            await session.commit()
+    await run_jobs(factory)
 
 
 async def job_status(session: AsyncSession) -> list[dict]:

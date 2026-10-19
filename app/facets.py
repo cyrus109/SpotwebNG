@@ -9,6 +9,7 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .cache import cached
 from .filters import (
     _COLUMNS,
     _DIMENSIONS,
@@ -24,6 +25,21 @@ from .models import Spot
 from .spotters import blocked_condition
 
 
+def _cached_facet(name: str, ttl: float = 60):
+    """Memoise a facet query by its arguments for a minute (invalidated after retrievals)."""
+
+    def decorate(fn):
+        async def wrapper(session, *args, **kwargs):
+            key = f"facet:{name}:{args}:{sorted(kwargs.items())}"
+            return await cached(key, ttl, lambda: fn(session, *args, **kwargs))
+
+        wrapper.__name__ = fn.__name__
+        wrapper.__doc__ = fn.__doc__
+        return wrapper
+
+    return decorate
+
+
 async def _count(session: AsyncSession, conds: list) -> int:
     stmt = select(func.count()).select_from(Spot).where(blocked_condition())
     for c in conds:
@@ -31,6 +47,7 @@ async def _count(session: AsyncSession, conds: list) -> int:
     return (await session.execute(stmt)).scalar_one()
 
 
+@_cached_facet("sections")
 async def section_counts(session: AsyncSession) -> dict[str, int]:
     """Spot count per sidebar section (All, Movies, Series, ...)."""
     counts: dict[str, int] = {}
@@ -40,6 +57,7 @@ async def section_counts(session: AsyncSession) -> dict[str, int]:
     return counts
 
 
+@_cached_facet("options")
 async def option_counts(session: AsyncSession, tree: str) -> list[dict]:
     """Per-dimension options for the drawer, each with a count and state.
 
@@ -106,6 +124,7 @@ async def option_counts(session: AsyncSession, tree: str) -> list[dict]:
     return dims
 
 
+@_cached_facet("dims")
 async def section_dimensions(session: AsyncSession, hide_adult: bool = False) -> list[dict]:
     """Every category's dimensions, for refining from the "All" view.
 

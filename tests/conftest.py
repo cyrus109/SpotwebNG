@@ -95,6 +95,17 @@ def csrf_token_for_test_clients(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def no_result_cache(monkeypatch):
+    """Cached counts would make a test see a stale view of its own writes."""
+    from app import cache
+
+    monkeypatch.setattr(cache, "enabled", False)
+    cache.invalidate()
+    yield
+    cache.invalidate()
+
+
+@pytest.fixture(autouse=True)
 def secret_key_for_tests(monkeypatch):
     """A fixed Fernet key, so tests never create a key file in the real data folder."""
     from app import secrets_store
