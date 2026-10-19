@@ -52,6 +52,7 @@ from .config import BASE_DIR, IMAGES_DIR, get_settings, load_providers
 from .csrf import csrf_context, verify_csrf
 from .db import SessionLocal, get_session
 from .downloader import check_sabnzbd, send_spot
+from .downloads import downloaded_map
 from .facets import option_counts, section_counts, section_dimensions
 from .filters import (
     FILTER_SECTIONS,
@@ -153,6 +154,7 @@ async def home(
         {
             "spots": rows,
             "comment_counts": await comment_counts(session, [s.message_id for s in rows]),
+            "downloaded": await downloaded_map(session, [s.message_id for s in rows]),
             "total": total,
             "q": q,
             "cat": cat,
@@ -245,6 +247,7 @@ async def detail(
         "detail.html",
         {
             "spot": spot,
+            "downloaded": (await downloaded_map(session, [spot.message_id])).get(spot.message_id),
             "comments": comments,
             "send_label": (
                 {"sabnzbd": "Send to SABnzbd", "blackhole": "Save to black hole"}.get(

@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .categories import CATEGORIES
 from .config import NZB_DIR, get_settings
 from .db import get_session
+from .downloads import record_download
 from .models import ApiUser, Spot
 from .settings_store import load_settings
 from .spots import (
@@ -202,6 +203,7 @@ async def newznab(
             return _error(300, "No such item")
         real = await _real_nzb(session, spot)
         if real is not None:
+            await record_download(session, spot.message_id, "api")
             return Response(
                 content=real,
                 media_type="application/x-nzb",

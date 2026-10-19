@@ -847,3 +847,8 @@ a { color: inherit; text-decoration: none; }
 .status-box { display: grid; gap: var(--ds-space-2, .5rem); margin-bottom: var(--ds-space-4, 1rem); }
 .progress { height: 8px; border-radius: 999px; background: rgba(255,255,255,.12); overflow: hidden; }
 .progress-bar { height: 100%; width: 0; background: var(--ds-accent, #7c9cff); transition: width .4s ease; }
+
+/* already-downloaded marks */
+.poster-card { position: relative; }
+.dl-badge { position: absolute; top: .5rem; right: .5rem; z-index: 2; width: 1.6rem; height: 1.6rem; display: grid; place-items: center; border-radius: 999px; background: #1f9d55; color: #fff; font-weight: 700; font-size: .9rem; box-shadow: 0 1px 4px rgba(0,0,0,.4); }
+.dl-mark { color: #1f9d55; font-weight: 700; }

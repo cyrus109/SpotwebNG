@@ -70,6 +70,19 @@ class Comment(Base):
     body_state: Mapped[int] = mapped_column(Integer, default=0)
 
 
+class Download(Base):
+    """A spot whose NZB has been delivered (see downloads.py)."""
+
+    __tablename__ = "downloads"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    message_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)
+    first_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    count: Mapped[int] = mapped_column(Integer, default=1)
+    source: Mapped[str] = mapped_column(String(16), default="api")
+
+
 class ApiUser(Base):
     """A consumer of the Newznab API (e.g. a Radarr/Sonarr instance)."""
 

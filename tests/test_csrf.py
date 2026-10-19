@@ -11,8 +11,7 @@ from app.main import app
 pytestmark = pytest.mark.raw_csrf
 
 
-@pytest.fixture
-async def web():
+async def _client(with_user: bool):
     factory = None
     # conftest installed an in-memory session override; reuse its factory
     override = app.dependency_overrides[get_session]
@@ -22,15 +21,37 @@ async def web():
     from sqlalchemy.ext.asyncio import async_sessionmaker
 
     maker = async_sessionmaker(factory, expire_on_commit=False)
-    async with maker() as s:
-        await create_user(s, "boss", "pw-boss-12345", ADMIN)
+    if with_user:
+        async with maker() as s:
+            await create_user(s, "boss", "pw-boss-12345", ADMIN)
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
         yield c
 
 
+@pytest.fixture
+async def web():
+    async for c in _client(True):
+        yield c
+
+
+@pytest.fixture
+async def open_web():
+    """An install with no accounts yet: /setup is open to whoever reaches it."""
+    async for c in _client(False):
+        yield c
+
+
 async def _login(c) -> str:
-    resp = await c.post("/login", data={"username": "boss", "password": "pw-boss-12345"})
+    await c.get("/login")  # a browser gets the pre-session cookie and token here
+    resp = await c.post(
+        "/login",
+        data={
+            "username": "boss",
+            "password": "pw-boss-12345",
+            "csrf_token": token_for(c.cookies["sw_csrf"]),
+        },
+    )
     assert resp.status_code == 303
     return c.cookies["sw_session"]
 
@@ -69,10 +90,18 @@ async def test_pages_carry_the_token_and_json_endpoints_check_it_too(web):
     ).status_code != 403
 
 
-async def test_signed_out_requests_are_not_blocked_so_signing_in_works(web):
-    page = (await web.get("/login")).text
-    assert 'name="csrf-token" content=""' in page
-    assert (await web.post("/login", data={"username": "boss", "password": "x"})).status_code == 200
+async def test_signed_out_posts_need_the_pre_session_token_too(web):
+    """Otherwise a hostile page could create the first admin on an open install."""
+    bare = {"username": "boss", "password": "x"}
+    assert (await web.post("/login", data=bare)).status_code == 403  # no cookie, no token
+
+    page = await web.get("/login")  # a real visit hands out the cookie and the token
+    assert "sw_csrf" in web.cookies
+    token = token_for(web.cookies["sw_csrf"])
+    assert f'name="csrf-token" content="{token}"' in page.text
+    assert (await web.post("/login", data=bare)).status_code == 403  # cookie alone is not enough
+    assert (await web.post("/login", data={**bare, "csrf_token": token})).status_code == 200
+    assert (await web.post("/login", data={**bare, "csrf_token": "x" * 64})).status_code == 403
 
 
 async def test_a_stale_cookie_can_still_sign_in_with_the_token_its_page_carried(web):
@@ -94,3 +123,12 @@ async def test_the_newznab_api_is_unaffected(web):
     cookie = await _login(web)
     assert cookie
     assert (await web.get("/api?t=caps")).status_code == 200
+
+
+async def test_a_hostile_page_cannot_create_the_first_admin(open_web):
+    evil = {"account_username": "evil", "account_password": "pw-evil-12345"}
+    form = {"provider_host": "news.example.com", "provider_port": "563", **evil}
+    assert (await open_web.post("/setup", data=form)).status_code == 403  # cross-site: no cookie
+    await open_web.get("/setup")  # the owner's own visit
+    token = token_for(open_web.cookies["sw_csrf"])
+    assert (await open_web.post("/setup", data={**form, "csrf_token": token})).status_code == 303

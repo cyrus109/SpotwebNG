@@ -28,6 +28,7 @@ from .auth import (
 )
 from .comments import retrieve_comments
 from .config import BASE_DIR, IMAGES_DIR, get_settings
+from .csrf import PRE_SESSION_COOKIE
 from .db import SessionLocal, get_session, init_db
 from .newznab import router as newznab_router
 from .retention import prune_old_spots, retention_cutoff
@@ -181,6 +182,16 @@ async def require_login(request: Request, call_next):
         if not allowed:
             return RedirectResponse("/", status_code=303)
     return await call_next(request)
+
+
+@app.middleware("http")
+async def csrf_cookie(request: Request, call_next):
+    """Hand a first-time visitor the pre-session CSRF cookie (see csrf.py)."""
+    response = await call_next(request)
+    fresh = getattr(request.state, "csrf_new", None)
+    if fresh:
+        response.set_cookie(PRE_SESSION_COOKIE, fresh, httponly=True, samesite="lax")
+    return response
 
 
 @app.get("/healthz")

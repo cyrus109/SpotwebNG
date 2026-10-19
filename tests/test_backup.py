@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.backup import export_chunks, import_file
-from app.models import Base, Comment, Setting, Spot, UsenetState
+from app.models import Base, Comment, Download, Setting, Spot, UsenetState
 
 NOW = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
 
@@ -49,6 +49,7 @@ async def source():
             )
         )
         s.add(UsenetState(infotype="spots", cur_article=500, cur_message_id="<s4@x>"))
+        s.add(Download(message_id="<s2@x>", first_at=NOW, last_at=NOW, count=3, source="send"))
         s.add(Setting(key="password", value="usenet-secret"))
         s.add(Setting(key="provider_host", value="news.example.com"))
         await s.commit()
@@ -74,9 +75,11 @@ async def test_round_trip_into_a_fresh_install(source, tmp_path):
     target, engine = await _factory()
     try:
         result = await import_file(target, path)
-        assert result["added"] == {"spots": 5, "comments": 1, "usenet_state": 1}
+        assert result["added"] == {"spots": 5, "comments": 1, "downloads": 1, "usenet_state": 1}
         assert await _count(target, Spot) == 5
         async with target() as s:
+            dl = (await s.execute(select(Download))).scalar_one()
+            assert (dl.message_id, dl.count, dl.source) == ("<s2@x>", 3, "send")
             state = await s.get(UsenetState, "spots")
             assert state.cur_article == 500  # no need to re-read the group
             cover_lost = (

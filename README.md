@@ -220,6 +220,14 @@ already exist are skipped, nothing is overwritten, and bookmarks are only taken 
 install has none. Cover images are not part of the file; spots that had one are fetched
 again in the background. Both are admin-only.
 
+## Downloaded checkmarks
+
+Spots whose NZB has been delivered — to a Newznab client such as Radarr or Sonarr, through the
+**Download NZB** link, or with **Send** — get a green ✓ in the grid and table, and the spot page
+shows when (and how often). The history is keyed by message-id, so it survives re-retrieving
+or wiping the spots, and it is part of the database export. *Forget which spots were downloaded*
+in *Status & backup* clears it.
+
 ## Sending spots to a downloader
 
 *Settings → Download client* adds a **Send** button to every spot page (administrators
@@ -242,6 +250,15 @@ comments and stale cached files, compact the database, reset the retrieval posit
 your spots, the next run starts from the backfill window again), delete all comments, or
 delete everything and start from zero. The destructive ones ask you to type `DELETE`. Users,
 settings and API keys are never touched.
+
+## Security notes
+
+- **CSRF:** every state-changing request carries a token derived from your session cookie
+  (or, before signing in, from a random cookie handed out with the first page), so another
+  website cannot submit forms or call endpoints as you — including creating the first
+  administrator on an install that has none yet. The Newznab `/api` is read-only and uses API keys.
+- Until the first administrator exists the instance is open to anyone who can reach it:
+  create the administrator first.
 
 ## Configuration
 

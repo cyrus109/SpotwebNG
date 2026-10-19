@@ -17,6 +17,7 @@ from typing import Any
 import httpx
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .downloads import record_download
 from .models import Spot
 
 SAB_TIMEOUT = 30.0
@@ -127,5 +128,9 @@ async def send_spot(session: AsyncSession, spot: Spot, prefs: dict[str, Any]) ->
         return _fail("This spot's NZB is not available (yet); try again in a moment")
     name = clean_name(spot.title)
     if action == "sabnzbd":
-        return await send_to_sabnzbd(prefs, name, nzb)
-    return await send_to_blackhole(prefs, spot.id, name, nzb)
+        result = await send_to_sabnzbd(prefs, name, nzb)
+    else:
+        result = await send_to_blackhole(prefs, spot.id, name, nzb)
+    if result["ok"]:
+        await record_download(session, spot.message_id, "send")
+    return result

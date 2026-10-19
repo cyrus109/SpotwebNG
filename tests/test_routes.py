@@ -727,3 +727,65 @@ async def test_maintenance_is_admin_only(client, cache_dirs):
     await c.post("/login", data={"username": "view", "password": "pw-view-12345"})
     resp = await _maint(c, "wipe", "DELETE")
     assert resp.status_code in (303, 307)
+
+
+# --- download history (checkmarks) -------------------------------------------
+
+
+async def test_a_delivered_nzb_is_checked_off_everywhere_and_a_stub_is_not(client, monkeypatch):
+    from sqlalchemy import select
+
+    from app.models import Download
+
+    c, factory = client
+    spot_id = await _first_spot_id(factory)
+
+    async def no_nzb(session, spot):
+        return None  # spot not enriched: the API serves a pointer stub
+
+    monkeypatch.setattr("app.newznab._real_nzb", no_nzb)
+    await c.get(f"/api?t=get&id={spot_id}&apikey={KEY}")
+    assert "dl-badge" not in (await c.get("/")).text  # a stub is not a download
+
+    async def real_nzb(session, spot):
+        return b"<nzb/>"
+
+    monkeypatch.setattr("app.newznab._real_nzb", real_nzb)
+    await c.get(f"/api?t=get&id={spot_id}&apikey={KEY}")
+    await c.get(f"/api?t=get&id={spot_id}&apikey={KEY}")
+    async with factory() as s:
+        row = (await s.execute(select(Download))).scalar_one()
+    assert row.message_id == "<r1@x>" and row.count == 2 and row.source == "api"
+    home = (await c.get("/")).text
+    assert home.count('class="dl-badge"') == 1 and home.count('class="dl-mark"') == 1
+    detail = (await c.get(f"/spot/{spot_id}")).text
+    assert "✓ Downloaded" in detail and "(2×)" in detail
+    other = await _first_spot_id(factory) + 1
+    assert "✓ Downloaded" not in (await c.get(f"/spot/{other}")).text
+
+
+async def test_sending_to_a_downloader_also_counts_and_wipe_keeps_the_history(
+    client, tmp_path, monkeypatch, cache_dirs
+):
+    from sqlalchemy import select
+
+    from app.models import Download
+
+    async def real_nzb(session, spot):
+        return b"<nzb/>"
+
+    monkeypatch.setattr("app.newznab._real_nzb", real_nzb)
+    c, factory = client
+    await _admin(c, factory)
+    await _set(factory, nzb_action="blackhole", blackhole_dir=str(tmp_path))
+    spot_id = await _first_spot_id(factory)
+    assert (await c.post(f"/spot/{spot_id}/send")).status_code == 200
+    async with factory() as s:
+        assert (await s.execute(select(Download.source))).scalar_one() == "send"
+    await _maint(c, "wipe", "DELETE")
+    async with factory() as s:
+        assert (await s.execute(select(Download))).scalars().first() is not None
+    assert (await _maint(c, "forget-downloads")).status_code == 400  # needs DELETE
+    assert (await _maint(c, "forget-downloads", "DELETE")).json()["ok"] is True
+    async with factory() as s:
+        assert (await s.execute(select(Download))).scalars().first() is None

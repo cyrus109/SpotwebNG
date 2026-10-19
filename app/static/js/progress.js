@@ -97,7 +97,7 @@
       const action = document.getElementById("maintAction").value;
       const msg = document.getElementById("maintMsg");
       const form = new URLSearchParams({ action });
-      if (action === "wipe" || action === "wipe-comments") {
+      if (action === "wipe" || action === "wipe-comments" || action === "forget-downloads") {
         const typed = prompt("This cannot be undone. Type DELETE to continue.");
         if (typed !== "DELETE") return;
         form.set("confirm", typed);

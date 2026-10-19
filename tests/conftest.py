@@ -80,9 +80,15 @@ def csrf_token_for_test_clients(request, monkeypatch):
 
     def build(self, *args, **kwargs):
         built = real(self, *args, **kwargs)
-        found = re.search(r"sw_session=([^;]+)", built.headers.get("cookie", ""))
-        if found and "x-csrf-token" not in built.headers:
-            built.headers["X-CSRF-Token"] = token_for(found.group(1))
+        cookies = built.headers.get("cookie", "")
+        found = re.search(r"sw_session=([^;]+)", cookies) or re.search(r"sw_csrf=([^;]+)", cookies)
+        if found is None:  # a browser would have been handed the pre-session cookie
+            built.headers["cookie"] = (cookies + "; sw_csrf=test-csrf").lstrip("; ")
+            secret = "test-csrf"
+        else:
+            secret = found.group(1)
+        if "x-csrf-token" not in built.headers:
+            built.headers["X-CSRF-Token"] = token_for(secret)
         return built
 
     monkeypatch.setattr(httpx.AsyncClient, "build_request", build)

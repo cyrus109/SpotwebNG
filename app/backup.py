@@ -28,7 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .comments import _MSGID_RE
-from .models import Comment, Spot, UsenetState
+from .models import Comment, Download, Spot, UsenetState
 from .spotnet import safe_website
 
 FORMAT = "spotwebng-export"
@@ -46,6 +46,7 @@ _SKIP = {"id", "created_at", "last_retrieved"}
 TABLES: dict[str, tuple[type, str]] = {
     "spots": (Spot, "message_id"),
     "comments": (Comment, "message_id"),
+    "downloads": (Download, "message_id"),
     "usenet_state": (UsenetState, "infotype"),
 }
 
@@ -156,6 +157,9 @@ def _sanitize(name: str, row: dict) -> bool:
                 ok = False
             if not ok:
                 row["nzb_segments"] = ""
+    elif name == "downloads":
+        if not _ID_RE.match(row.get("message_id", "")):
+            return False
     elif name == "comments":
         if not _MSGID_RE.match(row.get("message_id", "")):
             return False

@@ -14,12 +14,20 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .config import IMAGES_DIR, NZB_DIR
-from .models import Comment, Setting, Spot, UsenetState
+from .models import Comment, Download, Setting, Spot, UsenetState
 from .progress import KEY as STATUS_KEY
 from .retention import prune_old_spots
 
-ACTIONS = ("prune", "orphans", "vacuum", "reset-bookmarks", "wipe-comments", "wipe")
-DESTRUCTIVE = ("wipe-comments", "wipe")
+ACTIONS = (
+    "prune",
+    "orphans",
+    "vacuum",
+    "reset-bookmarks",
+    "wipe-comments",
+    "forget-downloads",
+    "wipe",
+)
+DESTRUCTIVE = ("wipe-comments", "forget-downloads", "wipe")
 
 
 def _unlink_dir(directory: Path, keep_ids: set[int] | None) -> int:
@@ -78,6 +86,11 @@ async def run_maintenance(session: AsyncSession, action: str) -> str:
         await session.commit()
         return f"Deleted {res.rowcount or 0:,} comments"
 
+    if action == "forget-downloads":
+        res = await session.execute(delete(Download))
+        await session.commit()
+        return f"Forgot {res.rowcount or 0:,} downloads"
+
     if action == "wipe":
         spots = await session.execute(delete(Spot))
         await session.execute(delete(Comment))
@@ -86,8 +99,6 @@ async def run_maintenance(session: AsyncSession, action: str) -> str:
         await session.commit()
         files = await asyncio.to_thread(_unlink_dir, IMAGES_DIR, None)
         files += await asyncio.to_thread(_unlink_dir, NZB_DIR, None)
-        return (
-            f"Deleted {spots.rowcount or 0:,} spots and {files:,} cached files; starting from zero"
-        )
+        return f"Deleted {spots.rowcount or 0:,} spots and {files:,} cached files; starting from zero (download history kept)"
 
     raise ValueError(f"Unknown action: {action}")
