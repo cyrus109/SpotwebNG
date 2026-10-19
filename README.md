@@ -293,6 +293,23 @@ title is looked up by its IMDb/TVmaze id, added with your profile and root folde
 straight away. Spots are matched through the IMDb/TVmaze link in their website or description; a
 background job fills that in for spots enriched earlier. Library lists are cached for ten minutes.
 
+## Coming from classic Spotweb
+
+Your existing Spotweb database can be imported, so you do not re-read Usenet:
+
+```bash
+pip install pymysql                       # or psycopg2-binary for PostgreSQL; SQLite needs nothing
+SPOTWEB_DB_URL='mysql+pymysql://user:pass@host/spotweb' python -m app.spotweb_import
+# in Docker:  docker compose exec -e SPOTWEB_DB_URL=… spotwebng python -m app.spotweb_import
+```
+
+It reads spots (with their full XML: description, website, NZB segments, IMDb link), comments,
+your download history and Spotweb's poster blacklist/whitelist (as blocked/trusted posters).
+The run is repeatable and resumable — existing rows are skipped. Cover images are not copied, so
+spots that had one are enriched again (use *Enrich only recent spots* to spread that out), and
+signatures are checked again when a spot is re-scanned. Usenet bookmarks are not copied; the next
+retrieval starts from the normal window and skips what you already have.
+
 ## Maintenance
 
 *Settings → Status & backup* has housekeeping commands: apply retention now, remove orphan
