@@ -29,6 +29,7 @@
         {% else %}<span class="pill" id="health-pill">not checked</span>{% endif %}
         <button class="linkish" type="button" id="btn-health" data-url="/spot/{{ spot.id }}/health">check</button>
       </span>
+      {% if in_library %}<span class="fact ok"><b>📚 In library</b> {{ arr_kind | capitalize }}</span>{% endif %}
       {% if downloaded %}<span class="fact ok"><b>✓ Downloaded</b> {{ downloaded.last_at.strftime('%Y-%m-%d %H:%M') }}{% if downloaded.count > 1 %} ({{ downloaded.count }}×){% endif %}</span>{% endif %}
     </div>
     {% if spot.description %}<div class="detail-desc">{{ spot.description }}</div>{% endif %}
@@ -36,6 +37,7 @@
       <a class="btn-glass btn-primary" href="/api?t=get&id={{ spot.id }}&apikey={{ api_key }}">⬇ Download NZB</a>
       {% if send_label %}<button class="btn-glass" type="button" id="btn-send" data-url="/spot/{{ spot.id }}/send">⇢ {{ send_label }}</button>
       <span id="send-msg" class="muted" role="status"></span>{% endif %}
+      {% if is_admin and arr_ready and not in_library %}<button class="btn-glass" type="button" id="btn-library" data-url="/spot/{{ spot.id }}/library">＋ Add to {{ arr_kind | capitalize }}</button>{% endif %}
       {% if is_admin and spot.spotter_id %}
         {% if spotter_status == 'blocked' %}<button class="btn-glass" type="button" data-spotter="{{ spot.spotter_id }}" data-status="neutral">Unblock poster</button>
         {% else %}<button class="btn-glass" type="button" data-spotter="{{ spot.spotter_id }}" data-status="blocked" data-confirm="Block this poster? All their spots disappear everywhere.">⛔ Block poster</button>

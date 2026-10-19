@@ -71,6 +71,38 @@
     });
   }
 
+  // --- Radarr / Sonarr test: fills the profile and root-folder choices -------
+  document.querySelectorAll("[data-arr-test]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const kind = btn.dataset.arrTest;
+      const msg = document.getElementById(kind + "TestMsg");
+      btn.disabled = true;
+      msg.textContent = "Testing…";
+      try {
+        const body = new URLSearchParams({
+          kind,
+          url: document.getElementById(kind + "_url").value,
+          apikey: document.getElementById(kind + "_apikey").value,
+        });
+        const r = await (await fetch("/settings/arr/test", { method: "POST", body })).json();
+        msg.textContent = (r.ok ? "✓ " : "✗ ") + (r.message || "");
+        if (r.ok) {
+          const fill = (id, options) => {
+            const sel = document.getElementById(id);
+            const keep = sel.value;
+            sel.replaceChildren(...options.map(([value, text]) => Object.assign(document.createElement("option"), { value, textContent: text, selected: String(value) === keep })));
+            sel.dispatchEvent(new Event("change", { bubbles: true }));
+          };
+          fill(kind + "_profile_id", r.profiles.map((p) => [p.id, p.name]));
+          fill(kind + "_root", r.roots.map((x) => [x.path, x.path]));
+        }
+      } catch (e) {
+        msg.textContent = "✗ Request failed";
+      }
+      btn.disabled = false;
+    });
+  });
+
   // --- notification test ------------------------------------------------
   const nBtn = document.getElementById("notifyTest");
   if (nBtn) {

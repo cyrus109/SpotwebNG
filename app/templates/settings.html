@@ -8,7 +8,7 @@
       <div class="rail-title">Settings</div>
       <div class="rail-nav">
         <a href="#all" class="rail-link" data-section="all"><span class="rail-text">All settings</span></a>
-        {% for key, label in [('usenet','Usenet provider'),('retrieval','Retrieval &amp; retention'),('status','Status &amp; backup'),('downloads','Download client'),('posters','Posters'),('notifications','Notifications'),
+        {% for key, label in [('usenet','Usenet provider'),('retrieval','Retrieval &amp; retention'),('status','Status &amp; backup'),('downloads','Download client'),('posters','Posters'),('arr','Radarr &amp; Sonarr'),('notifications','Notifications'),
                               ('display','Display'),('appearance','Appearance'),
                               ('api','API access'),('account','Your account'),('users','Users')] %}
         <a href="#{{ key }}" class="rail-link" data-section="{{ key }}"><span class="rail-text">{{ label | safe }}</span></a>
@@ -322,6 +322,30 @@
         <div class="set-info"><span class="set-name">Test SABnzbd</span><span class="set-desc" id="sabTestMsg">Uses the URL and key above (the saved key if left blank).</span></div>
         <div class="set-control"><button class="btn-glass" type="button" id="sabTest">Test connection</button></div>
       </div>
+    </div>
+  </section>
+
+  <section class="card" id="arr">
+    <div class="card-head"><div class="card-head-text">
+      <h2>Radarr &amp; Sonarr</h2>
+      <p class="card-sub">Spots already in your library get a 📚 badge, and administrators can add a movie or series with one click (movies go to Radarr, series to Sonarr). Spots are matched through the IMDb/TVmaze link in their description or website.</p>
+    </div></div>
+    <div class="card-rows">
+      {% for kind, label in [('radarr','Radarr'),('sonarr','Sonarr')] %}
+      <div class="set-row"><div class="set-info"><span class="set-name">{{ label }}</span></div>
+        <div class="set-control"><input type="url" name="{{ kind }}_url" id="{{ kind }}_url" value="{{ values[kind ~ '_url'] }}" placeholder="http://{{ kind }}:{{ 7878 if kind == 'radarr' else 8989 }}" autocomplete="off"></div></div>
+      <div class="set-row"><div class="set-info"><label class="set-name" for="{{ kind }}_apikey">{{ label }} API key</label>
+        <span class="set-desc">{{ 'Saved. Leave blank to keep.' if values[kind ~ '_apikey'] else 'Settings → General in ' ~ label ~ '.' }}</span></div>
+        <div class="set-control"><input type="password" name="{{ kind }}_apikey" id="{{ kind }}_apikey" value="" autocomplete="new-password"></div></div>
+      <div class="set-row"><div class="set-info"><label class="set-name" for="{{ kind }}_profile_id">Quality profile</label></div>
+        <div class="set-control"><select name="{{ kind }}_profile_id" id="{{ kind }}_profile_id">
+          <option value="{{ values[kind ~ '_profile_id'] }}">{{ ('Profile #' ~ values[kind ~ '_profile_id']) if values[kind ~ '_profile_id'] else 'Test the connection to choose' }}</option></select></div></div>
+      <div class="set-row"><div class="set-info"><label class="set-name" for="{{ kind }}_root">Root folder</label></div>
+        <div class="set-control"><select name="{{ kind }}_root" id="{{ kind }}_root">
+          <option value="{{ values[kind ~ '_root'] }}">{{ values[kind ~ '_root'] or 'Test the connection to choose' }}</option></select></div></div>
+      <div class="set-row"><div class="set-info"><span class="set-name">Test {{ label }}</span><span class="set-desc" id="{{ kind }}TestMsg">Uses the address and key above (the saved key if blank).</span></div>
+        <div class="set-control"><button class="btn-glass" type="button" data-arr-test="{{ kind }}">Test connection</button></div></div>
+      {% endfor %}
     </div>
   </section>
 

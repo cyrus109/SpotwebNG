@@ -16,8 +16,16 @@ MAX_TEXT = 1500
 _CTRL = re.compile(r"[\x00-\x1f\x7f]")
 
 
-def _clean(text: str, limit: int) -> str:
-    return text[:limit]
+def _clean(text: str, limit: int, newlines: bool = True) -> str:
+    """Spot titles come from Usenet: drop control characters (and line breaks when asked)."""
+    pattern = re.compile(r"[\x00-\x08\x0b-\x1f\x7f]") if newlines else _CTRL
+    return pattern.sub(" " if not newlines else "", text)[:limit]
+
+
+def _discord_safe(text: str) -> str:
+    """Neutralise Discord markdown and @mentions in untrusted text."""
+    text = re.sub(r"([\\*_~`|>])", r"\\\1", text)
+    return text.replace("@", "@\u200b")  # @everyone / @here / user mentions become inert
 
 
 def _header(text: str) -> str:
@@ -52,7 +60,8 @@ async def notify(
     prefs: dict[str, Any], title: str, text: str, link: str = ""
 ) -> dict[str, dict[str, Any]]:
     """Send to every configured channel; returns {channel: {ok, message}}."""
-    title, text, link = _clean(title, 200), _clean(text, MAX_TEXT), _clean(link, 500)
+    title = _clean(title, 200, newlines=False)
+    text, link = _clean(text, MAX_TEXT), _clean(link, 500, newlines=False)
     results: dict[str, dict[str, Any]] = {}
     async with httpx.AsyncClient(timeout=TIMEOUT, follow_redirects=False) as client:
         if prefs.get("notify_webhook_url"):
@@ -62,9 +71,14 @@ async def notify(
                 json={"title": title, "text": text, "url": link},
             )
         if prefs.get("notify_discord_url"):
-            body = f"**{title}**\n{text}" + (f"\n{link}" if link else "")
+            body = f"**{_discord_safe(title)}**\n{_discord_safe(text)}" + (
+                f"\n{link}" if link else ""
+            )
             results["discord"] = await _post(
-                client, prefs["notify_discord_url"], json={"content": body[:1900]}
+                client,
+                prefs["notify_discord_url"],
+                # allowed_mentions: nothing in the message may ping anyone, whatever it says
+                json={"content": body[:1900], "allowed_mentions": {"parse": []}},
             )
         if prefs.get("notify_ntfy_url"):
             headers = {"Title": _header(title)}

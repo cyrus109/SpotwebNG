@@ -68,6 +68,9 @@ from .filters import (
 from .health import check_spot
 from .jobs import job_status
 from .jobs import rerun as jobs_rerun
+from .library import ArrClient, ArrError, kind_for, library_marks
+from .library import client_for as arr_client_for
+from .library import configured as arr_configured
 from .maintenance import ACTIONS, DESTRUCTIVE, run_maintenance
 from .models import ApiUser, Comment, Setting, Spot, User, Watch, WatchHit
 from .nntp_check import check_nntp
@@ -188,6 +191,7 @@ async def home(
             "spots": rows,
             "comment_counts": await comment_counts(session, [s.message_id for s in rows]),
             "downloaded": await downloaded_map(session, [s.message_id for s in rows]),
+            "in_library": await library_marks(prefs, rows),
             "total": total,
             "q": q,
             "cat": cat,
@@ -284,6 +288,10 @@ async def detail(
             "spot": spot,
             "downloaded": (await downloaded_map(session, [spot.message_id])).get(spot.message_id),
             "spotter_status": await spotters.status_of(session, spot.spotter_id),
+            "in_library": bool(await library_marks(prefs, [spot])),
+            "arr_kind": kind_for(spot),
+            "arr_ready": arr_configured(prefs, kind_for(spot))
+            and bool(spot.imdb_id or spot.tvmaze_id),
             "is_admin": await is_admin(session, request.cookies.get(COOKIE)),
             "comments": comments,
             "send_label": (
@@ -303,9 +311,15 @@ async def detail(
 
 @router.post("/spot/{spot_id}/health")
 async def spot_health(
-    spot_id: int, force: str = Form(""), session: AsyncSession = Depends(get_session)
+    request: Request,
+    spot_id: int,
+    force: str = Form(""),
+    session: AsyncSession = Depends(get_session),
 ) -> JSONResponse:
-    """Check whether the spot's articles are still on the news server (cached for a day)."""
+    """Check whether the spot's articles are still on the news server (cached for a day).
+    Forcing a fresh check is for administrators: it costs the provider real requests."""
+    if force == "1" and not await is_admin(session, request.cookies.get(COOKIE)):
+        force = ""
     spot = await get_spot(session, spot_id)
     prefs = await load_settings(session)
     if spot is None or (prefs["hide_adult"] and is_adult_spot(spot)):
@@ -469,6 +483,64 @@ async def notify_test(session: AsyncSession = Depends(get_session)) -> JSONRespo
     ok = all(r["ok"] for r in results.values())
     detail = ", ".join(f"{name}: {r['message']}" for name, r in results.items())
     return JSONResponse({"ok": ok, "message": detail})
+
+
+@router.post("/settings/arr/test")
+async def arr_test(
+    kind: str = Form(...),
+    url: str = Form(""),
+    apikey: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    """Check Radarr/Sonarr with the form's values (blank key = the saved one) and list the
+    quality profiles and root folders to choose from."""
+    if kind not in ("radarr", "sonarr"):
+        return JSONResponse({"ok": False, "message": "Unknown application"}, status_code=400)
+    prefs = await load_settings(session)
+    target = url.strip().rstrip("/")
+    if not re.fullmatch(r"https?://[^\s]+", target):
+        return JSONResponse({"ok": False, "message": "Enter an http(s):// address"})
+    client = ArrClient(kind, target, apikey or prefs[f"{kind}_apikey"])
+    try:
+        status = await client.status()
+        options = await client.options()
+    except ArrError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)})
+    return JSONResponse(
+        {"ok": True, "message": f"Connected to {status['app']} {status['version']}", **options}
+    )
+
+
+@router.post("/spot/{spot_id}/library")
+async def add_to_library(
+    request: Request, spot_id: int, session: AsyncSession = Depends(get_session)
+) -> JSONResponse:
+    """Add the spot's title to Radarr (movies) or Sonarr (series). Administrators only."""
+    if not await is_admin(session, request.cookies.get(COOKIE)):
+        return JSONResponse({"ok": False, "message": "Administrators only"}, status_code=403)
+    spot = await get_spot(session, spot_id)
+    prefs = await load_settings(session)
+    if spot is None or (prefs["hide_adult"] and is_adult_spot(spot)):
+        return JSONResponse({"ok": False, "message": "Not found"}, status_code=404)
+    kind = kind_for(spot)
+    if not arr_configured(prefs, kind):
+        return JSONResponse({"ok": False, "message": f"{kind.title()} is not set up (Settings)"})
+    if not (spot.imdb_id or spot.tvmaze_id):
+        return JSONResponse({"ok": False, "message": "This spot has no IMDb or TVmaze link"})
+    if not prefs[f"{kind}_profile_id"] or not prefs[f"{kind}_root"]:
+        return JSONResponse(
+            {
+                "ok": False,
+                "message": f"Choose a quality profile and root folder for {kind.title()} first",
+            }
+        )
+    try:
+        message = await arr_client_for(prefs, kind).add(
+            spot.imdb_id, spot.tvmaze_id, prefs[f"{kind}_profile_id"], prefs[f"{kind}_root"]
+        )
+    except ArrError as exc:
+        return JSONResponse({"ok": False, "message": str(exc)})
+    return JSONResponse({"ok": True, "message": message})
 
 
 @router.post("/spotter/{spotter_id}/status")

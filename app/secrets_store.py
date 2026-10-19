@@ -38,6 +38,8 @@ SECRET_KEYS = frozenset(
         "notify_discord_url",
         "notify_ntfy_url",
         "notify_telegram_token",
+        "radarr_apikey",
+        "sonarr_apikey",
     }
 )
 

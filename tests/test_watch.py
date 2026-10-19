@@ -48,7 +48,7 @@ async def test_every_channel_gets_its_own_format(monkeypatch):
     import json
 
     assert json.loads(seen["hook.example"].content) == {
-        "title": "Title\r\nInjected: header",
+        "title": "Title  Injected: header",  # line breaks in a title never survive
         "text": "Body text",
         "url": "https://app/spot/1",
     }
@@ -252,3 +252,26 @@ async def test_an_imported_watch_starts_from_now(factory, captured):
     await _spot(factory, "New Match Two")
     async with factory() as s:
         assert (await watch.run_watches(s))["matched"] == 1
+
+
+async def test_untrusted_titles_cannot_ping_or_format_a_discord_channel(monkeypatch):
+    import json
+
+    seen = {}
+
+    def handler(request):
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(204)
+
+    _mock(monkeypatch, handler)
+    evil = "@everyone **click** [here](http://x) _y_ `z`"
+    await notify(
+        {"notify_discord_url": "https://discord.example/hook"},
+        evil,
+        f"{evil}\x00\x1b",
+        "https://app/spot/1",
+    )
+    sent = seen["body"]
+    assert sent["allowed_mentions"] == {"parse": []}
+    assert "@everyone" not in sent["content"] and "@​everyone" in sent["content"]
+    assert "**click**" not in sent["content"] and "\x00" not in sent["content"]

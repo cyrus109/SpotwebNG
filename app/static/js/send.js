@@ -10,6 +10,21 @@
       else alert((await r.json()).message || "Failed");
     });
   });
+  const libBtn = document.getElementById("btn-library");
+  if (libBtn) {
+    libBtn.addEventListener("click", async () => {
+      const msg = document.getElementById("send-msg") || libBtn;
+      libBtn.disabled = true;
+      try {
+        const j = await (await fetch(libBtn.dataset.url, { method: "POST" })).json();
+        msg.textContent = (j.ok ? "✓ " : "✗ ") + (j.message || "");
+        if (j.ok) libBtn.remove();
+      } catch (e) {
+        msg.textContent = "✗ Request failed";
+        libBtn.disabled = false;
+      }
+    });
+  }
   const healthBtn = document.getElementById("btn-health");
   if (healthBtn) {
     healthBtn.addEventListener("click", async () => {

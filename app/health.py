@@ -91,13 +91,27 @@ async def _stat_all(provider: dict, ids: list[str]) -> tuple[int, int]:
     return sum(1 for r in flat if r), len(flat)
 
 
+_inflight: set[int] = set()  # spots being checked right now: one check at a time per spot
+_slots = asyncio.Semaphore(3)  # and at most three spots at once, whoever asks
+
+
 async def check_spot(session: AsyncSession, spot: Spot, force: bool = False) -> dict[str, Any]:
     """Check (or reuse a recent check of) a spot. Returns {health, label, pct, checked_at, ...}."""
     now = datetime.now(UTC)
     fresh = spot.health_checked_at and now - _aware(spot.health_checked_at) < RECHECK_AFTER
     if spot.health != UNCHECKED and fresh and not force:
         return _report(spot)
+    if spot.id in _inflight:
+        return {**_report(spot), "error": "A check of this spot is already running"}
+    _inflight.add(spot.id)
+    try:
+        async with _slots:
+            return await _check(session, spot, now)
+    finally:
+        _inflight.discard(spot.id)
 
+
+async def _check(session: AsyncSession, spot: Spot, now: datetime) -> dict[str, Any]:
     from .newznab import _real_nzb  # assembles (and caches) the real NZB
 
     nzb = await _real_nzb(session, spot)

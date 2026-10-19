@@ -284,6 +284,15 @@ and each watch acts on a spot only once. A live preview shows how many spots mat
 addresses and tokens are stored encrypted and never shown again, and request URLs are kept out of
 the log. You can also be alerted when retrieval fails several times in a row (and when it recovers).
 
+## Radarr and Sonarr
+
+*Settings → Radarr & Sonarr* connects the apps' v3 API (address + API key; *Test connection* lists
+your quality profiles and root folders). Spots that are already in your library get a 📚 badge,
+and on a spot page administrators get **Add to Radarr** (movies) or **Add to Sonarr** (series): the
+title is looked up by its IMDb/TVmaze id, added with your profile and root folder, and searched for
+straight away. Spots are matched through the IMDb/TVmaze link in their website or description; a
+background job fills that in for spots enriched earlier. Library lists are cached for ten minutes.
+
 ## Maintenance
 
 *Settings → Status & backup* has housekeeping commands: apply retention now, remove orphan

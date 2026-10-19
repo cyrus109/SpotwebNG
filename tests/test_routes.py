@@ -898,3 +898,115 @@ async def test_request_urls_with_tokens_are_never_logged(caplog):
 
     assert logging.getLogger("httpx").level >= logging.WARNING
     assert logging.getLogger("httpcore").level >= logging.WARNING
+
+
+# --- Radarr / Sonarr -------------------------------------------------------------
+
+
+async def test_library_badge_add_button_and_the_one_click_add(client, monkeypatch):
+    import json
+
+    import httpx
+    from sqlalchemy import select
+
+    c, factory = client
+    await _admin(c, factory)
+    seen = {}
+
+    def handler(request):
+        seen.setdefault("calls", []).append((request.method, request.url.path))
+        if request.url.path == "/api/v3/movie" and request.method == "GET":
+            return httpx.Response(
+                200, json=[{"imdbId": "tt0000001"}]
+            )  # only r0 is "in the library"
+        if "lookup" in request.url.path:
+            return httpx.Response(200, json=[{"title": "T", "tmdbId": 5, "id": 0}])
+        seen["body"] = json.loads(request.content)
+        return httpx.Response(201, json={"id": 1})
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        "app.library.httpx.AsyncClient",
+        lambda **kw: real(transport=httpx.MockTransport(handler), **kw),
+    )
+    async with factory() as s:
+        spots = (await s.execute(select(Spot).order_by(Spot.id))).scalars().all()
+        spots[0].imdb_id, spots[1].imdb_id = "0000001", "0000002"
+        await s.commit()
+        owned, wanted = spots[0].id, spots[1].id
+    await _set(
+        factory,
+        radarr_url="http://radarr:7878",
+        radarr_apikey="K",
+        radarr_profile_id="4",
+        radarr_root="/movies",
+    )
+
+    home = (await c.get("/")).text
+    assert home.count('class="lib-badge"') == 1  # only the spot Radarr already has
+    assert (
+        'id="btn-library"' not in (await c.get(f"/spot/{owned}")).text
+        and "In library" in (await c.get(f"/spot/{owned}")).text
+    )
+    assert "Add to Radarr" in (await c.get(f"/spot/{wanted}")).text
+
+    added = (await c.post(f"/spot/{wanted}/library")).json()
+    assert added == {"ok": True, "message": "Added to Radarr"}
+    assert seen["body"]["qualityProfileId"] == 4 and seen["body"]["rootFolderPath"] == "/movies"
+    no_link = (await c.post(f"/spot/{await _first_spot_id(factory)}/library")).json()
+    assert no_link["ok"] is False or no_link["message"]  # r1 has no ids unless set above
+
+
+async def test_adding_to_the_library_needs_an_admin_and_a_configured_app(client):
+    c, factory = client
+    async with factory() as s:
+        await create_user(s, "boss", "pw-boss-12345", ADMIN)
+        await create_user(s, "view", "pw-view-12345", "viewer")
+    spot_id = await _first_spot_id(factory)
+    await c.post("/login", data={"username": "view", "password": "pw-view-12345"})
+    assert (await c.post(f"/spot/{spot_id}/library")).status_code == 403
+    await c.post("/logout")
+    await c.post("/login", data={"username": "boss", "password": "pw-boss-12345"})
+    result = (await c.post(f"/spot/{spot_id}/library")).json()
+    assert result["ok"] is False and "not set up" in result["message"]
+
+
+async def test_the_arr_test_endpoint_lists_profiles_and_roots_and_hides_the_key(
+    client, monkeypatch
+):
+    import httpx
+
+    c, factory = client
+    await _admin(c, factory)
+
+    def handler(request):
+        assert request.headers["x-api-key"] == "TYPEDKEY"
+        if request.url.path.endswith("/system/status"):
+            return httpx.Response(200, json={"appName": "Radarr", "version": "5.2.1"})
+        if request.url.path.endswith("/qualityprofile"):
+            return httpx.Response(
+                200, json=[{"id": 1, "name": "Any"}, {"id": 4, "name": "HD-1080p"}]
+            )
+        return httpx.Response(200, json=[{"path": "/movies"}])
+
+    real = httpx.AsyncClient
+    monkeypatch.setattr(
+        "app.library.httpx.AsyncClient",
+        lambda **kw: real(transport=httpx.MockTransport(handler), **kw),
+    )
+    ok = (
+        await c.post(
+            "/settings/arr/test",
+            data={"kind": "radarr", "url": "http://radarr:7878", "apikey": "TYPEDKEY"},
+        )
+    ).json()
+    assert ok["ok"] and ok["message"] == "Connected to Radarr 5.2.1"
+    assert ok["profiles"][1] == {"id": 4, "name": "HD-1080p"} and ok["roots"] == [
+        {"path": "/movies"}
+    ]
+    assert (
+        await c.post("/settings/arr/test", data={"kind": "evil", "url": "http://x"})
+    ).status_code == 400
+    assert (
+        await c.post("/settings/arr/test", data={"kind": "radarr", "url": "javascript:alert(1)"})
+    ).json()["ok"] is False

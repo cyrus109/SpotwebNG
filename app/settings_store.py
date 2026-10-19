@@ -51,6 +51,14 @@ SPEC: dict[str, tuple[Any, str]] = {
         3,
         "int",
     ),  # alert after this many failed retrievals in a row (0 = off)
+    "radarr_url": ("", "str"),
+    "radarr_apikey": ("", "secret"),
+    "radarr_profile_id": (0, "int"),
+    "radarr_root": ("", "str"),
+    "sonarr_url": ("", "str"),
+    "sonarr_apikey": ("", "secret"),
+    "sonarr_profile_id": (0, "int"),
+    "sonarr_root": ("", "str"),
     "sab_url": ("", "str"),
     "sab_apikey": ("", "secret"),  # never rendered back into a page
     "sab_category": ("", "str"),
@@ -78,6 +86,8 @@ CLAMPS = {
     "retrieve_days": (0, 36500),
     "backup_keep": (0, 60),
     "notify_failure_after": (0, 50),
+    "radarr_profile_id": (0, 10_000),
+    "sonarr_profile_id": (0, 10_000),
     "enrich_older_than_days": (0, 36500),
     "sab_priority": (-100, 2),
 }
@@ -108,7 +118,12 @@ def _coerce(key: str, raw: str) -> Any:
     if kind == "bool":
         return str(raw).strip().lower() in ("1", "true", "on", "yes")
     text = _CONTROL.sub("", str(raw)).strip()
-    if key in ("sab_url", "public_url"):  # an http(s) base URL, or nothing
+    if key in (
+        "sab_url",
+        "public_url",
+        "radarr_url",
+        "sonarr_url",
+    ):  # an http(s) base URL, or nothing
         return text.rstrip("/") if re.fullmatch(r"https?://[^\s]+", text) else default
     if key in ("notify_webhook_url", "notify_discord_url", "notify_ntfy_url"):
         return text if (not text or re.fullmatch(r"https?://[^\s]+", text)) else default

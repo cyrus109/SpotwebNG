@@ -50,6 +50,7 @@
   {% for s in spots %}
   <a class="poster-card" href="/spot/{{ s.id }}">
     <span class="cat-badge">{{ s.category | catname }}</span>
+    {% if s.id in in_library %}<span class="lib-badge" title="Already in your Radarr/Sonarr library" aria-label="In library">📚</span>{% endif %}
     {% if s.message_id in downloaded %}<span class="dl-badge" title="Downloaded {{ downloaded[s.message_id].last_at.strftime('%Y-%m-%d') }}" aria-label="Already downloaded">✓</span>{% endif %}
     {% if s.poster_url %}
       <div class="poster-shot">
@@ -74,7 +75,7 @@
   <tbody>
   {% for s in spots %}
     <tr onclick="location.href='/spot/{{ s.id }}'" style="cursor:pointer">
-      <td class="t-title">{% if s.message_id in downloaded %}<span class="dl-mark" title="Downloaded {{ downloaded[s.message_id].last_at.strftime('%Y-%m-%d') }}" aria-label="Already downloaded">✓</span> {% endif %}{{ s.title }}{% if comment_counts.get(s.message_id) %} <span class="pill" title="Comments">💬 {{ comment_counts[s.message_id] }}</span>{% endif %}</td>
+      <td class="t-title">{% if s.id in in_library %}<span title="In your library">📚</span> {% endif %}{% if s.message_id in downloaded %}<span class="dl-mark" title="Downloaded {{ downloaded[s.message_id].last_at.strftime('%Y-%m-%d') }}" aria-label="Already downloaded">✓</span> {% endif %}{{ s.title }}{% if comment_counts.get(s.message_id) %} <span class="pill" title="Comments">💬 {{ comment_counts[s.message_id] }}</span>{% endif %}</td>
       <td>{{ s.category | catname }}</td>
       <td>{{ s.size | gb }}</td>
       <td>{{ s.posted_at.strftime('%Y-%m-%d %H:%M') }}</td>

@@ -222,3 +222,23 @@ async def test_the_health_route_works_for_signed_in_users_and_hides_adult_spots(
         assert ok["ok"] and ok["label"] == "complete"  # a fresh stored result: no network needed
         assert (await c.post(f"/spot/{ids['Adult']}/health")).status_code == 404
         assert "complete" in (await c.get(f"/spot/{ids['Fine']}")).text
+
+
+async def test_only_admins_can_force_a_recheck_and_a_spot_is_never_checked_twice_at_once(
+    db, monkeypatch
+):
+    import asyncio
+
+    server = await _setup(db, monkeypatch, set())
+    try:
+        async with db() as s:
+            spot = (await s.execute(select(Spot))).scalar_one()
+        async with db() as s1, db() as s2:
+            a = (await s1.execute(select(Spot))).scalar_one()
+            b = (await s2.execute(select(Spot))).scalar_one()
+            first, second = await asyncio.gather(health.check_spot(s1, a), health.check_spot(s2, b))
+        errors = [r for r in (first, second) if "error" in r]
+        assert len(errors) == 1 and "already running" in errors[0]["error"]
+        assert spot.id not in health._inflight
+    finally:
+        await server.stop()

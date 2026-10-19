@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .cache import invalidate
+from .library import extract_ids
 from .models import Spot, UsenetState
 from .progress import history_percent, live_idle, live_set, load_status, save_status
 from .secrets_store import all_settings
@@ -642,6 +643,8 @@ async def enrich_new_spots(
                 if full["description"]:
                     spot.description = full["description"][:4000]
                 spot.website = safe_website(full["website"])[:1024]
+                imdb, tvmaze = extract_ids(full["website"], full["description"])
+                spot.imdb_id, spot.tvmaze_id = imdb or spot.imdb_id, tvmaze or spot.tvmaze_id
                 if full["nzb_segments"]:
                     spot.nzb_segments = json.dumps(full["nzb_segments"])
                 if full["image"]:
