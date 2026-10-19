@@ -27,7 +27,15 @@ def _engine(tmp_path):
 
 async def _schema_diff(engine):
     def run(conn):
-        ctx = MigrationContext.configure(conn, opts={"compare_type": True})
+        ctx = MigrationContext.configure(
+            conn,
+            opts={
+                "compare_type": True,
+                "include_object": lambda obj, name, type_, reflected, compare_to: (
+                    not (type_ == "table" and name.startswith("spots_fts"))
+                ),
+            },
+        )
         return compare_metadata(ctx, Base.metadata)
 
     async with engine.connect() as conn:

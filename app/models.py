@@ -58,6 +58,9 @@ class Spot(Base):
     spotter_id: Mapped[str] = mapped_column(String(16), default="", index=True)
     verified: Mapped[int] = mapped_column(Integer, default=0, index=True)  # 0 not evaluated
     from_hdr: Mapped[str] = mapped_column(String(700), default="")
+    # Derived data (app/derived.py jobs fill rows stored before these existed).
+    adult: Mapped[int] = mapped_column(Integer, default=-1, index=True)  # -1 unknown, 0/1
+    title_key: Mapped[str] = mapped_column(String(255), default="", index=True)  # see titles.py
 
 
 class Spotter(Base):

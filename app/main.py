@@ -19,6 +19,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
+from . import derived  # noqa: F401  (registers the derived-data jobs)
 from .auth import (
     COOKIE,
     is_admin,

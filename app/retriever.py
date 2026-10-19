@@ -24,6 +24,8 @@ from .models import Spot, UsenetState
 from .progress import history_percent, live_idle, live_set, load_status, save_status
 from .secrets_store import all_settings
 from .spotnet import decode_spot_binary, parse_full_xml, parse_xover_row, safe_website
+from .spots import adult_flag
+from .titles import title_key
 
 
 def pack_subcats(codes: list[str], limit: int) -> str:
@@ -274,6 +276,8 @@ async def _store_rows(
                 subcat_c=_sub("c", 64),
                 subcat_d=_sub("d", 128),
                 subcat_z=_sub("z", 32),
+                adult=adult_flag(s.newznab_cat, _sub("z", 32)),
+                title_key=title_key(s.title),
                 keyid=s.keyid,
                 verified=s.verified,
                 spotter_id=s.spotter_id[:16],

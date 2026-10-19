@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .categories import expand_categories
@@ -20,11 +20,24 @@ ADULT_CATEGORY_LOW = 6000
 ADULT_CATEGORY_HIGH = 6999
 
 
-def adult_condition() -> Any:
-    """Matches every spot the adult filter is meant to hide."""
+def legacy_adult_condition() -> Any:
+    """The adult test computed from the raw columns (also what the `adult-flag` job uses)."""
     return or_(
         Spot.category.between(ADULT_CATEGORY_LOW, ADULT_CATEGORY_HIGH),
         Spot.subcat_z.like("%z3|%"),
+    )
+
+
+def adult_condition() -> Any:
+    """Matches every spot the adult filter is meant to hide. Uses the indexed flag; rows the
+    job has not reached yet (adult < 0) fall back to the raw test, so nothing ever leaks."""
+    return or_(Spot.adult == 1, and_(Spot.adult < 0, legacy_adult_condition()))
+
+
+def adult_flag(category: int, subcat_z: str) -> int:
+    """The flag value for a new row."""
+    return int(
+        ADULT_CATEGORY_LOW <= (category or 0) <= ADULT_CATEGORY_HIGH or "z3|" in (subcat_z or "")
     )
 
 

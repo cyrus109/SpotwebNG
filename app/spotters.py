@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import exists, func, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import signing
@@ -22,7 +22,17 @@ STATUSES = ("neutral", "trusted", "blocked")
 def blocked_condition() -> Any:
     """SQL condition: the spot's poster is not blocked."""
     return ~exists(
-        select(1).where(Spotter.spotter_id == Spot.spotter_id, Spotter.status == "blocked")
+        select(1).where(
+            Spotter.status == "blocked",
+            or_(
+                Spotter.spotter_id == Spot.spotter_id,
+                # a Spotweb-style short id (imported blacklist) blocks every id it prefixes
+                and_(
+                    func.length(Spotter.spotter_id) <= 8,
+                    Spot.spotter_id.startswith(Spotter.spotter_id),
+                ),
+            ),
+        )
     )
 
 

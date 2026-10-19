@@ -50,7 +50,10 @@ def test_spotter_id_matches_the_documented_algorithm():
         .decode()
         .translate(str.maketrans("", "", "/+="))
     )
-    assert signing.spotter_id(mod_b64) == expected and 3 <= len(expected) <= 6
+    assert signing.crc_id(mod_b64) == expected and 3 <= len(expected) <= 6
+    full = signing.spotter_id(mod_b64)  # Spotweb's id plus a SHA-256 suffix: collision-resistant
+    assert full.startswith(expected) and len(full) <= 16 and full != expected
+    assert full.isalnum()
 
 
 def test_rsa_verify_accepts_valid_and_rejects_everything_else(key):
@@ -99,7 +102,7 @@ def test_a_self_signed_spot_verifies_and_gets_a_spotter_id(key):
     mid = _find_hashcash_id()
     from_hdr = _self_signed_from(key, "Dune Part Two", "Nick", mid)
     status, keyid, sid = signing.verify_spot(from_hdr, "Dune Part Two", mid)
-    assert (status, keyid) == (signing.VERIFIED, 7) and 3 <= len(sid) <= 6
+    assert (status, keyid) == (signing.VERIFIED, 7) and 8 <= len(sid) <= 16
     assert sid == signing.spotter_id(
         _prepare(_mod_bytes(key)).replace("-s", "/").replace("-p", "+")
     )
@@ -290,3 +293,43 @@ async def test_blocking_through_the_web_ui_is_admin_only_and_hides_the_spots():
         assert "blocked" in (await c.get(f"/spot/{spot_id}")).text  # still reachable to unblock
         bad = await c.post("/spotter/SPAMID/status", data={"status": "banned"})
         assert bad.status_code == 400
+
+
+def test_attacker_chosen_exponents_and_oversized_keys_are_refused(key):
+    n = _modulus(key)
+    size = (n.bit_length() + 7) // 8
+    # With e=1 the "signature" is just the padded digest: forgeable by anyone for any key.
+    digest_info = signing._SHA1_PREFIX + hashlib.sha1(b"<x@y>").digest()
+    forged = b"\x00\x01" + b"\xff" * (size - len(digest_info) - 3) + b"\x00" + digest_info
+    assert not signing.rsa_verify_sha1(n, b"<x@y>", forged, exponent=1)
+    pub = base64.b64encode(n.to_bytes(size, "big")).decode()
+    prepared = _prepare(forged)
+    status, _ = signing.verify_comment("x@y", prepared, pub, "AQ==", "", "")  # exponent 1
+    assert status == signing.FAILED
+    assert not signing.rsa_verify_sha1(2**5000 + 1, b"m", b"x" * 626)  # too big: no pow()
+    assert not signing.rsa_verify_sha1(2**100 + 1, b"m", b"x" * 13)  # too small
+    assert signing.b64decode("A" * 5000) == b""
+
+
+def test_a_replayed_self_signed_header_without_the_user_signature_is_not_attributed(key):
+    mid = _find_hashcash_id()
+    from_hdr = _self_signed_from(key, "Dune Part Two", "Nick", mid)
+    pub, rest = from_hdr.split("<")[1].split("@", 1)
+    stripped = f"Nick <{pub.split('.')[0]}@{rest}"  # drop the user signature
+    assert signing.verify_spot(stripped, "Dune Part Two", mid) == (signing.UNSIGNED, 7, "")
+    # and a user signature made for a different message-id does not transfer
+    other = _find_hashcash_id().replace("hc", "hd")
+    assert signing.verify_spot(from_hdr, "Dune Part Two", other)[0] == signing.FAILED
+
+
+async def test_a_short_spotweb_id_blocks_every_full_id_it_prefixes(factory):
+    when = datetime(2026, 7, 1, tzinfo=UTC)
+    async with factory() as s:
+        s.add(
+            Spot(message_id="<p@x>", title="Prefixed", posted_at=when, spotter_id="ABCDEFxyz12345")
+        )
+        s.add(Spot(message_id="<q@x>", title="Other", posted_at=when, spotter_id="ZZZZZZxyz12345"))
+        await s.commit()
+        await spotters.set_status(s, "ABCDEF", "blocked", "imported from Spotweb")
+        rows, _ = await search_spots(s)
+    assert [r.title for r in rows] == ["Other"]
