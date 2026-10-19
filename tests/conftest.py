@@ -107,10 +107,13 @@ def no_result_cache(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def secret_key_for_tests(monkeypatch):
-    """A fixed Fernet key, so tests never create a key file in the real data folder."""
+    """A throwaway Fernet key generated per run (no key literal in the repo), so tests never
+    create a key file in the real data folder."""
+    from cryptography.fernet import Fernet
+
     from app import secrets_store
 
-    monkeypatch.setenv(secrets_store.KEY_ENV, "u3Uc-qAi9iiJvjFS0sc41QDndEJWpJZ9u1chk6IYVWA=")
+    monkeypatch.setenv(secrets_store.KEY_ENV, Fernet.generate_key().decode())
     secrets_store.reset_key_cache()
     yield
     secrets_store.reset_key_cache()

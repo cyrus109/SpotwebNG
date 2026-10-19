@@ -126,7 +126,7 @@ async def test_the_newznab_api_is_unaffected(web):
 
 
 async def test_a_hostile_page_cannot_create_the_first_admin(open_web):
-    evil = {"account_username": "evil", "account_password": "pw-evil-12345"}
+    evil = {"account_username": "evil", "account_password": "evil-evil-evil"}
     form = {"provider_host": "news.example.com", "provider_port": "563", **evil}
     assert (await open_web.post("/setup", data=form)).status_code == 403  # cross-site: no cookie
     await open_web.get("/setup")  # the owner's own visit

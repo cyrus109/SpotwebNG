@@ -1,0 +1,6 @@
+# Fingerprints of findings in OLD commits that are known to be harmless test values.
+# Both were removed in the working tree (the Fernet key is now generated per test run, the
+# password was replaced by an obviously fake one). History is not rewritten for fake values.
+# Format: <commit>:<file>:<rule>:<line>
+66aff840a838a248f06856435b159132d468db22:tests/conftest.py:generic-api-key:102
+91ad37aa4cf356b3da3ac851c6a31f4a89e5cecf:tests/test_csrf.py:generic-api-key:129
