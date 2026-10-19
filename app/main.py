@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -103,10 +104,17 @@ async def _enrich_loop() -> None:
     while True:
         try:
             async with SessionLocal() as session:
-                if not (await load_settings(session))["auto_enrich"]:
+                prefs = await load_settings(session)
+                if not prefs["auto_enrich"]:
                     await asyncio.sleep(ENRICH_INTERVAL)
                     continue
-                result = await enrich_new_spots(session, images_dir=IMAGES_DIR, limit=ENRICH_BATCH)
+                days = prefs["enrich_older_than_days"]
+                result = await enrich_new_spots(
+                    session,
+                    images_dir=IMAGES_DIR,
+                    limit=ENRICH_BATCH,
+                    newer_than=datetime.now(UTC) - timedelta(days=days) if days else None,
+                )
             if result["enriched"] or result["failed"]:
                 logger.info("spot enrichment: %s", result)
                 await asyncio.sleep(2)  # keep draining while there's a backlog

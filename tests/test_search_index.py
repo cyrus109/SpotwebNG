@@ -197,3 +197,20 @@ async def test_backfilling_subcategories_recomputes_the_adult_flag(env):
         await s.commit()
         refreshed = (await s.execute(select(Spot))).scalar_one()
     assert "z3|" in refreshed.subcat_z and refreshed.adult == 1
+
+
+async def test_the_cache_is_bounded_whatever_users_search_for(monkeypatch):
+    monkeypatch.setattr(cache, "enabled", True)
+    monkeypatch.setattr(cache, "MAX_ENTRIES", 50)
+    cache.invalidate()
+
+    async def make():
+        return 1
+
+    for i in range(500):  # 500 distinct "searches"
+        await cache.cached(f"total:q{i}", 60, make)
+    assert len(cache._store) <= 50
+    assert "total:q499" in cache._store and "total:q0" not in cache._store  # newest kept
+    await cache.cached("total:" + "x" * 5000, 60, make)  # oversized key: computed, never stored
+    assert not any(len(k) > cache.MAX_KEY_LENGTH for k in cache._store)
+    cache.invalidate()

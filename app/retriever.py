@@ -202,6 +202,43 @@ async def _note_group(session: AsyncSession, client: NntpClient, first: int, las
     await session.commit()
 
 
+MAX_CONNECTIONS = 8
+
+
+def _connections(provider: dict, cap: int = MAX_CONNECTIONS) -> int:
+    """How many parallel connections to use: the provider setting, bounded."""
+    try:
+        wanted = int(provider.get("connections", 1) or 1)
+    except ValueError:
+        wanted = 1
+    return max(1, min(wanted, cap))
+
+
+async def _open_extras(
+    provider: dict, count: int, group: str | None = HDR_GROUP
+) -> list[NntpClient]:
+    """Extra connections for parallel work. A provider that refuses more connections just
+    means fewer workers, never a failed run."""
+    extras: list[NntpClient] = []
+    for _ in range(max(count, 0)):
+        extra = NntpClient()
+        try:
+            await extra.connect(
+                provider["provider_host"],
+                int(provider.get("provider_port", 119)),
+                provider.get("provider_ssl", "yes") == "yes",
+                provider.get("username", ""),
+                provider.get("password", ""),
+            )
+            if group:
+                await extra.group(group)
+        except (NntpError, OSError, TimeoutError):
+            await extra.quit()
+            break
+        extras.append(extra)
+    return extras
+
+
 async def _store_rows(
     session: AsyncSession, rows: list[dict], min_posted: datetime | None = None
 ) -> tuple[int, int, int]:
@@ -314,6 +351,7 @@ async def retrieve_spots(
         min_posted = age_cutoff  # rows older than the limit aren't wanted either
     provider = await _load_provider(session)
     client = NntpClient()
+    extras: list[NntpClient] = []
     await client.connect(
         provider["provider_host"],
         int(provider.get("provider_port", 119)),
@@ -362,6 +400,7 @@ async def retrieve_spots(
                 floor.cur_article = start
 
         scanned = added = invalid = backfilled = 0
+        extras = await _open_extras(provider, _connections(provider) - 1)
         while start <= last:
             end = min(start + INCREMENT - 1, last)
             rows = await client.xover(start, end)
@@ -385,46 +424,62 @@ async def retrieve_spots(
         days_reached = (await load_status(session)).get("days_reached_for") == max_age_days
         if not (retrieve_all and age_cutoff):
             days_reached = False
+        pool = [client, *extras]  # parallel connections: one XOVER window per connection
         while floor.cur_article > target and not days_reached:
+            ranges: list[tuple[int, int]] = []
             hi = floor.cur_article - 1
-            lo = max(target, hi - INCREMENT + 1)
-            # A misbehaving server may answer outside the range; trusting it
-            # could leave the floor unmoved and loop forever.
-            rows = [r for r in await client.xover(lo, hi) if lo <= r["Number"] <= hi]
-            back_scanned += len(rows)
-            scanned += len(rows)
-
-            a, i, b = await _store_rows(session, rows, min_posted)
-            added, invalid, backfilled = added + a, invalid + i, backfilled + b
-
-            floor_date = None
-            if rows:
-                lowest = min(rows, key=lambda r: r["Number"])
-                floor.cur_article = lowest["Number"]
-                floor.cur_message_id = lowest.get("Message-ID", "").strip()
-                floor_date = row_date(lowest)
-            else:
-                floor.cur_article = lo
-                floor.cur_message_id = ""
-            fields: dict = {"floor": floor.cur_article}
-            if age_cutoff and rows:
-                # Judge the chunk by its newest row (clamped to now): one bogus
-                # ancient date must not end the walk early, a bogus future one
-                # only makes it walk further than needed.
-                newest = max(min(d, datetime.now(UTC)) for d in map(row_date, rows) if d)
-                if newest < age_cutoff:
-                    days_reached = True
-                    fields["days_reached_for"] = max_age_days
-            if floor_date:
-                fields["floor_date"] = floor_date.isoformat()
-            await save_status(session, **fields)
-            status = await load_status(session)
-            live_set(
-                phase="Walking back through history",
-                percent=history_percent(status),
-                detail=f"{added:,} older spots added",
+            for _ in pool:
+                if hi < target:
+                    break
+                lo = max(target, hi - INCREMENT + 1)
+                ranges.append((lo, hi))
+                hi = lo - 1
+            fetched = await asyncio.gather(
+                *(conn.xover(lo, hi) for conn, (lo, hi) in zip(pool, ranges, strict=False))
             )
-            await session.commit()
+            # Store the windows strictly newest -> oldest, so the floor only ever moves
+            # down past rows that are already committed (a crash mid-window just re-reads).
+            for (lo, hi), raw_rows in zip(ranges, fetched, strict=True):
+                # A misbehaving server may answer outside the range; trusting it
+                # could leave the floor unmoved and loop forever.
+                rows = [r for r in raw_rows if lo <= r["Number"] <= hi]
+                back_scanned += len(rows)
+                scanned += len(rows)
+
+                a, i, b = await _store_rows(session, rows, min_posted)
+                added, invalid, backfilled = added + a, invalid + i, backfilled + b
+
+                floor_date = None
+                if rows:
+                    lowest = min(rows, key=lambda r: r["Number"])
+                    floor.cur_article = lowest["Number"]
+                    floor.cur_message_id = lowest.get("Message-ID", "").strip()
+                    floor_date = row_date(lowest)
+                else:
+                    floor.cur_article = lo
+                    floor.cur_message_id = ""
+                fields: dict = {"floor": floor.cur_article}
+                if age_cutoff and rows:
+                    # Judge the chunk by its newest row (clamped to now): one bogus
+                    # ancient date must not end the walk early, a bogus future one
+                    # only makes it walk further than needed.
+                    now = datetime.now(UTC)
+                    newest = max((min(d, now) for d in map(row_date, rows) if d), default=None)
+                    if newest is not None and newest < age_cutoff:
+                        days_reached = True
+                        fields["days_reached_for"] = max_age_days
+                if floor_date:
+                    fields["floor_date"] = floor_date.isoformat()
+                await save_status(session, **fields)
+                status = await load_status(session)
+                live_set(
+                    phase="Walking back through history",
+                    percent=history_percent(status),
+                    detail=f"{added:,} older spots added",
+                )
+                await session.commit()
+                if days_reached:
+                    break
 
         await save_status(session, floor=floor.cur_article, last_run=datetime.now(UTC).isoformat())
         await session.commit()
@@ -441,6 +496,8 @@ async def retrieve_spots(
         }
     finally:
         live_idle()
+        for extra in extras:
+            await extra.quit()
         await client.quit()
 
 
@@ -499,13 +556,39 @@ async def fetch_binary(client: NntpClient, segments: list[str], compressed: bool
         return None
 
 
+async def _fetch_spot(client: NntpClient, spot: Spot) -> dict | None:
+    """The network half of enriching one spot: its full XML and, if it has one, its cover."""
+    full = await read_full_spot(client, spot.message_id)
+    if full is None:
+        return None
+    full["image"] = None
+    if full["image_segments"]:
+        try:
+            full["image"] = await fetch_binary(client, full["image_segments"], compressed=False)
+        except Exception:
+            full["image"] = None
+    return full
+
+
 async def enrich_new_spots(
-    session: AsyncSession, images_dir, limit: int = 50, only_id: int | None = None
+    session: AsyncSession,
+    images_dir,
+    limit: int = 50,
+    only_id: int | None = None,
+    newer_than: datetime | None = None,
+    max_connections: int = 4,
 ) -> dict:
     """Enrich pending spots (newest first) with description, website, NZB
-    segment list, and the spot's own image saved to images_dir."""
+    segment list, and the spot's own image saved to images_dir.
+
+    `newer_than` leaves older spots for when they are opened (lazy enrichment);
+    `only_id` always wins, so opening a spot enriches it regardless. Spots are
+    fetched in parallel (one connection each) and applied one at a time."""
     provider = await _load_provider(session)
-    stmt = select(Spot).where(Spot.enriched == 0).order_by(Spot.posted_at.desc()).limit(limit)
+    stmt = select(Spot).where(Spot.enriched == 0)
+    if newer_than is not None:
+        stmt = stmt.where(Spot.posted_at >= newer_than)
+    stmt = stmt.order_by(Spot.posted_at.desc()).limit(limit)
     if only_id is not None:
         stmt = select(Spot).where(Spot.id == only_id, Spot.enriched == 0)
     pending = (await session.execute(stmt)).scalars().all()
@@ -523,44 +606,52 @@ async def enrich_new_spots(
         provider.get("username", ""),
         provider.get("password", ""),
     )
+    workers = min(_connections(provider, max_connections), len(pending))
+    extras = await _open_extras(provider, workers - 1, group=None)
+    pool = [client, *extras]
     enriched = failed = 0
     try:
-        for spot in pending:
-            try:
-                full = await read_full_spot(client, spot.message_id)
-            except Exception:
-                # A dropped connection or an oversized header must not discard
-                # the whole batch — mark nothing, retry this spot next round.
-                await session.commit()
-                break
-            if full is None:
-                spot.enriched = 2
-                failed += 1
-                await session.commit()
-                continue
+        for start in range(0, len(pending), len(pool)):
+            batch = pending[start : start + len(pool)]
+            results = await asyncio.gather(
+                *(_fetch_spot(conn, spot) for conn, spot in zip(pool, batch, strict=False)),
+                return_exceptions=True,
+            )
+            stop = False
+            for spot, full in zip(batch, results, strict=True):
+                if isinstance(full, BaseException):
+                    # A dropped connection or an oversized header must not discard the
+                    # whole batch: mark nothing, retry this spot next round.
+                    stop = True
+                    continue
+                if full is None:
+                    spot.enriched = 2
+                    failed += 1
+                    await session.commit()
+                    continue
 
-            if full["description"]:
-                spot.description = full["description"][:4000]
-            spot.website = safe_website(full["website"])[:1024]
-            if full["nzb_segments"]:
-                spot.nzb_segments = json.dumps(full["nzb_segments"])
-
-            if full["image_segments"]:
-                try:
-                    image = await fetch_binary(client, full["image_segments"], compressed=False)
-                except Exception:
-                    image = None
-                if image:
-                    (images_dir / f"{spot.id}.jpg").write_bytes(image)
+                if full["description"]:
+                    spot.description = full["description"][:4000]
+                spot.website = safe_website(full["website"])[:1024]
+                if full["nzb_segments"]:
+                    spot.nzb_segments = json.dumps(full["nzb_segments"])
+                if full["image"]:
+                    await asyncio.to_thread(
+                        (images_dir / f"{spot.id}.jpg").write_bytes, full["image"]
+                    )
                     spot.poster_url = f"/image/{spot.id}"
-            elif full["image_url"]:
-                spot.poster_url = full["image_url"][:1024]
+                elif full["image_url"] and not full["image_segments"]:
+                    spot.poster_url = full["image_url"][:1024]
 
-            spot.enriched = 1
-            enriched += 1
-            # Commit per spot: a later failure then costs one spot, not fifty,
-            # and never orphans an image that was already written to disk.
-            await session.commit()
+                spot.enriched = 1
+                enriched += 1
+                # Commit per spot: a later failure then costs one spot, not fifty,
+                # and never orphans an image that was already written to disk.
+                await session.commit()
+            if stop:
+                break
     finally:
+        for extra in extras:
+            await extra.quit()
         await client.quit()
     return {"enriched": enriched, "failed": failed}

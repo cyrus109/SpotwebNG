@@ -128,6 +128,15 @@
       </div>
       <div class="set-row">
         <div class="set-info">
+          <label class="set-name" for="enrich_older_than_days">Enrich only recent spots</label>
+          <span class="set-desc">Fetch covers and descriptions in the background only for spots this many days old or younger (0 = all). Older spots are enriched when you open them &mdash; ideal after a long history walk.</span>
+        </div>
+        <div class="set-control input-unit">
+          <input type="number" min="0" max="36500" step="1" name="enrich_older_than_days" id="enrich_older_than_days" value="{{ values.enrich_older_than_days }}"><span class="unit">days</span>
+        </div>
+      </div>
+      <div class="set-row">
+        <div class="set-info">
           <label class="set-name" for="backup_keep">Automatic backups</label>
           <span class="set-desc">Keep this many daily backups in the data folder (0 turns them off). Each is a full export.</span>
         </div>

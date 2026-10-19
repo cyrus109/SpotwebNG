@@ -36,7 +36,13 @@ def _xover_line(n: int) -> str:
 class FakeNewsServer:
     """Speaks just enough NNTP: auth, GROUP, XOVER, XHDR Message-ID."""
 
-    def __init__(self, first: int = 100, articles: dict[int, str] | None = None):
+    def __init__(
+        self, first: int = 100, articles: dict[int, str] | None = None, max_clients: int = 99
+    ):
+        self.max_clients = max_clients
+        self.connections = 0  # total ever accepted
+        self.concurrent = 0  # open right now
+        self.peak = 0
         self.first = first
         self.articles = articles if articles is not None else {}
         self.server = None
@@ -55,6 +61,20 @@ class FakeNewsServer:
         await self.server.wait_closed()
 
     async def _handle(self, reader, writer):
+        self.connections += 1
+        if self.concurrent >= self.max_clients:
+            writer.write(b"502 too many connections\r\n")
+            await writer.drain()
+            writer.close()
+            return
+        self.concurrent += 1
+        self.peak = max(self.peak, self.concurrent)
+        try:
+            await self._serve(reader, writer)
+        finally:
+            self.concurrent -= 1
+
+    async def _serve(self, reader, writer):
         writer.write(b"200 fake ready\r\n")
         await writer.drain()
         while True:
@@ -619,5 +639,99 @@ async def test_days_mode_first_run_walks_back_that_many_days(db, monkeypatch):
             oldest = (await session.execute(select(func.min(Spot.posted_at)))).scalar_one()
         assert (now - oldest.replace(tzinfo=UTC)).days <= 20
         assert 15 <= await _count(db) <= 21  # about 20 days of spots, not the whole group
+    finally:
+        await server.stop()
+
+
+# ---------- parallel connections and lazy enrichment ----------
+
+
+async def _set(factory, **values):
+    async with factory() as s:
+        for k, v in values.items():
+            s.add(Setting(key=k, value=v))
+        await s.commit()
+
+
+async def test_history_walk_uses_parallel_connections_and_loses_nothing(db, monkeypatch):
+    monkeypatch.setattr("app.retriever.INCREMENT", 10)
+    server = _history()
+    await server.start()
+    await _configure(db, server.port)
+    await _set(db, connections="4")
+    try:
+        async with db() as session:
+            result = await retrieve_spots(session, max_backfill=10, retrieve_all=True)
+        assert await _count(db) == 100 and result["floor"] == 100
+        assert server.peak >= 3  # several windows were really fetched at once
+        assert server.concurrent == 0  # and every connection was closed again
+    finally:
+        await server.stop()
+
+
+async def test_a_provider_that_refuses_extra_connections_just_means_fewer_workers(db, monkeypatch):
+    monkeypatch.setattr("app.retriever.INCREMENT", 10)
+    server = FakeNewsServer(
+        first=100, articles={i: _xover_line(i) for i in range(100, 200)}, max_clients=2
+    )
+    await server.start()
+    await _configure(db, server.port)
+    await _set(db, connections="6")
+    try:
+        async with db() as session:
+            await retrieve_spots(session, max_backfill=10, retrieve_all=True)
+        assert await _count(db) == 100 and server.peak == 2
+    finally:
+        await server.stop()
+
+
+async def test_the_day_limit_still_stops_the_parallel_walk_at_the_right_chunk(db, monkeypatch):
+    from datetime import datetime
+
+    monkeypatch.setattr("app.retriever.INCREMENT", 10)
+    now = datetime.now(UTC)
+    server = FakeNewsServer(
+        first=100, articles={n: _dated_line(n, 199 - n, now) for n in range(100, 200)}
+    )
+    await server.start()
+    await _configure(db, server.port)
+    await _set(db, connections="4")
+    try:
+        async with db() as session:
+            result = await retrieve_spots(
+                session, max_backfill=10, retrieve_all=True, max_age_days=30
+            )
+        assert result["floor"] >= 150  # stopped near day 30, not at the server's first article
+        assert await _count(db) == 30
+    finally:
+        await server.stop()
+
+
+async def test_lazy_enrichment_skips_old_spots_until_they_are_opened(db):
+    from datetime import datetime, timedelta
+
+    from app.retriever import enrich_new_spots
+
+    server = FakeNewsServer(first=1, articles={})
+    await server.start()
+    await _configure(db, server.port)
+    now = datetime.now(UTC)
+    async with db() as s:
+        s.add(Spot(message_id="<young@x>", title="Young", posted_at=now - timedelta(days=2)))
+        s.add(Spot(message_id="<old@x>", title="Old", posted_at=now - timedelta(days=400)))
+        await s.commit()
+    try:
+        async with db() as s:  # nothing is on the fake server, so each attempt marks "failed" (2)
+            result = await enrich_new_spots(
+                s, images_dir="/tmp/x-unused", newer_than=now - timedelta(days=30)
+            )
+        assert result["failed"] == 1  # only the young spot was attempted
+        async with db() as s:
+            rows = {r.title: r.enriched for r in (await s.execute(select(Spot))).scalars().all()}
+        assert rows == {"Young": 2, "Old": 0}
+        async with db() as s:  # opening the old spot enriches it regardless of age
+            old = (await s.execute(select(Spot).where(Spot.title == "Old"))).scalar_one()
+            await enrich_new_spots(s, images_dir="/tmp/x-unused", only_id=old.id)
+            assert old.enriched == 2
     finally:
         await server.stop()

@@ -29,6 +29,7 @@ SPEC: dict[str, tuple[Any, str]] = {
     "retrieve_all": (False, "bool"),  # walk back to the server's oldest article
     "retrieve_days": (0, "int"),  # ...or only this many days back (0 = no limit)
     "auto_enrich": (True, "bool"),
+    "enrich_older_than_days": (0, "int"),  # 0 = enrich everything; else only spots this young
     "backup_keep": (
         3,
         "int",
@@ -64,6 +65,7 @@ CLAMPS = {
     "retention_days": (0, 3650),
     "retrieve_days": (0, 36500),
     "backup_keep": (0, 60),
+    "enrich_older_than_days": (0, 36500),
     "sab_priority": (-100, 2),
 }
 
