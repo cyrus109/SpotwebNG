@@ -35,6 +35,16 @@ first.)
 3. **Automatic backups** (*Settings → Automatic backups*, default 3 daily) write a full export
    to `/data/backups`.
 
+## The secret key
+
+Stored credentials (Usenet password, SABnzbd / Radarr / Sonarr keys, notification tokens) are
+encrypted with a key kept **outside the database**: `SPOTWEBNG_SECRET_KEY` if set (generate one
+with `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`),
+otherwise `/data/secret.key`, created on first start. A copied database or backup alone does not
+expose the credentials. **Keep a copy of the key**: if it is lost the credentials read as empty
+and must be entered again (your spots are unaffected). Existing plaintext credentials are
+encrypted automatically at the first start of this version.
+
 ## Rolling back
 
 ```bash

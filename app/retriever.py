@@ -20,8 +20,9 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .models import Setting, Spot, UsenetState
+from .models import Spot, UsenetState
 from .progress import history_percent, live_idle, live_set, load_status, save_status
+from .secrets_store import all_settings
 from .spotnet import decode_spot_binary, parse_full_xml, parse_xover_row, safe_website
 
 
@@ -165,7 +166,7 @@ class NntpClient:
 
 
 async def _load_provider(session: AsyncSession) -> dict:
-    settings = {s.key: s.value for s in (await session.execute(select(Setting))).scalars().all()}
+    settings = await all_settings(session)
     if not settings.get("provider_host"):
         raise ValueError("No Usenet provider configured — complete the setup wizard first")
     return settings

@@ -80,7 +80,10 @@ async def test_saving_setup_without_a_password_keeps_the_stored_one(client):
         },
     )
     async with factory() as s:
-        assert (await s.get(Setting, "password")).value == "s3cret-usenet-pw"
+        stored = (await s.get(Setting, "password")).value
+    from app.secrets_store import decrypt
+
+    assert stored.startswith("enc:") and decrypt(stored) == "s3cret-usenet-pw"
 
 
 async def test_search_limit_cannot_be_negative(client):

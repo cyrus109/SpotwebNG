@@ -14,6 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Setting
+from .secrets_store import decrypt, encrypt
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
@@ -104,7 +105,9 @@ async def load_settings(session: AsyncSession) -> dict[str, Any]:
     """All known settings, with defaults filled in and values coerced."""
     stored = {s.key: s.value for s in (await session.execute(select(Setting))).scalars().all()}
     return {
-        key: _coerce(key, stored[key]) if key in stored else default
+        key: _coerce(key, decrypt(stored[key]) if SPEC[key][1] == "secret" else stored[key])
+        if key in stored
+        else default
         for key, default in DEFAULTS.items()
     }
 
@@ -151,6 +154,8 @@ async def save_settings(session: AsyncSession, values: dict[str, str]) -> dict[s
             continue
         existing = await session.get(Setting, key)
         text = str(_coerce(key, raw))
+        if kind == "secret":
+            text = encrypt(text)
         if existing:
             existing.value = text
         else:

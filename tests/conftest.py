@@ -92,3 +92,14 @@ def csrf_token_for_test_clients(request, monkeypatch):
         return built
 
     monkeypatch.setattr(httpx.AsyncClient, "build_request", build)
+
+
+@pytest.fixture(autouse=True)
+def secret_key_for_tests(monkeypatch):
+    """A fixed Fernet key, so tests never create a key file in the real data folder."""
+    from app import secrets_store
+
+    monkeypatch.setenv(secrets_store.KEY_ENV, "u3Uc-qAi9iiJvjFS0sc41QDndEJWpJZ9u1chk6IYVWA=")
+    secrets_store.reset_key_cache()
+    yield
+    secrets_store.reset_key_cache()

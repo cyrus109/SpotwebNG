@@ -69,6 +69,7 @@ from .nntp_check import check_nntp
 from .progress import LIVE, history_percent, live_idle, live_set, load_status, save_status
 from .retention import retention_cutoff
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
+from .secrets_store import SECRET_KEYS, all_settings, encrypt, public_settings
 from .settings_store import backfill_plan, load_settings, save_settings
 from .spots import get_spot, is_adult_spot, search_spots
 from .version import VERSION
@@ -304,7 +305,7 @@ async def sab_test(
 async def setup_form(
     request: Request, session: AsyncSession = Depends(get_session)
 ) -> HTMLResponse:
-    current = {s.key: s.value for s in (await session.execute(select(Setting))).scalars().all()}
+    current = await public_settings(session)
     api_user = (await session.execute(select(ApiUser))).scalars().first()
     return templates.TemplateResponse(
         request,
@@ -548,6 +549,8 @@ async def setup_save(
         "connections": str(connections),
     }
     for key, value in values.items():
+        if key in SECRET_KEYS:
+            value = encrypt(value)  # idempotent: a kept, already-encrypted value passes through
         existing = await session.get(Setting, key)
         if existing:
             existing.value = value
@@ -666,7 +669,7 @@ async def settings_page(
 ) -> HTMLResponse:
     from .config import SPOT_DATA_DIR
 
-    current = {s.key: s.value for s in (await session.execute(select(Setting))).scalars().all()}
+    current = await public_settings(session)
     spots_total = (await session.execute(select(func.count()).select_from(Spot))).scalar_one()
     images = (
         await session.execute(select(func.count()).select_from(Spot).where(Spot.poster_url != ""))
@@ -813,7 +816,7 @@ async def settings_reset_user_password(
 @router.post("/settings/test")
 async def settings_test(session: AsyncSession = Depends(get_session)) -> JSONResponse:
     """Test the saved provider credentials without reopening the wizard."""
-    stored = {s.key: s.value for s in (await session.execute(select(Setting))).scalars().all()}
+    stored = await all_settings(session)
     if not stored.get("provider_host"):
         return JSONResponse({"ok": False, "message": "No provider configured yet"})
     result = await check_nntp(

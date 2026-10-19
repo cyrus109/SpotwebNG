@@ -629,7 +629,10 @@ async def test_the_sabnzbd_key_is_never_rendered_and_blank_keeps_it(client):
 
     async with factory() as s:
         kept = (await s.execute(select(Setting).where(Setting.key == "sab_apikey"))).scalar_one()
-    assert kept.value == "topsecretkey123"
+    from app.secrets_store import decrypt
+
+    assert kept.value.startswith("enc:") and "topsecretkey123" not in kept.value
+    assert decrypt(kept.value) == "topsecretkey123"
 
 
 # --- maintenance commands -------------------------------------------------
