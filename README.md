@@ -171,8 +171,12 @@ clients want the base URL, others the full `/api`.
 - **Filtering** — implements Spotweb's `tree` grammar (`cat0_z0_a9`, `~` to exclude): OR
   within a dimension, AND across dimensions. All 283 Spotnet category codes are included
   under their real names.
-- **Retention** — keep spots listed while dropping their heavy parts, or delete them
-  outright. Without a policy an index grows forever.
+- **Retention** — *Keep spots for N days* is applied after every retrieval run (and by *Apply retention
+  now* in Status & backup), by posting date. *Keep them listed, drop covers & NZB data* leaves the spot
+  searchable but removes its cover, description and NZB references; *Delete them completely* removes
+  the spot, its comments and cached files (download history is kept). It never touches newer spots, and
+  with *Delete* the retrieval skips spots older than the cutoff. SQLite does not hand freed space back to
+  the disk by itself: run *Compact the database* afterwards. Without a policy an index grows forever.
 - **Comments** — read-only. Comment headers are indexed from the comments newsgroup
   (*Settings → Index comments*; the group name is configurable, default `free.usenet`) and
   linked to their spot through their own message-id. The text of a comment loads the first

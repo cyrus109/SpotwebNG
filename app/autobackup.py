@@ -38,6 +38,7 @@ def summary(directory: Path | None = None) -> dict:
         "count": len(files),
         "bytes": sum(f.stat().st_size for f in files),
         "latest": datetime.fromtimestamp(latest, UTC).isoformat() if latest else None,
+        "latest_bytes": files[-1].stat().st_size if files else 0,
     }
 
 

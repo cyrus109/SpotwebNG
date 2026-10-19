@@ -86,6 +86,8 @@ from .settings_store import backfill_plan, load_settings, save_settings
 from .spots import get_spot, is_adult_spot, search_spots
 from .stats import bars as stats_bars
 from .stats import collect as stats_collect
+from .storage import collect as storage_collect
+from .storage import warning as storage_warning
 from .version import VERSION
 from .watch import ACTIONS as watch_actions
 from .watch import new_watch
@@ -674,6 +676,11 @@ async def retrieve_now(
     return JSONResponse({"ok": True, **result})
 
 
+async def storage_info(session: AsyncSession, keep: int) -> dict:
+    info = await cached("storage", 300, lambda: storage_collect(session))
+    return {**info, "backups": backup_summary(), "warning": storage_warning(info, keep)}
+
+
 async def _signature_stats(session: AsyncSession) -> dict:
     rows = (
         await session.execute(select(Spot.verified, func.count()).group_by(Spot.verified))
@@ -708,6 +715,7 @@ async def retrieve_status(session: AsyncSession = Depends(get_session)) -> JSONR
             "jobs": await job_status(session),
             "signatures": await cached("sig-stats", 60, lambda: _signature_stats(session)),
             "backups": backup_summary(),
+            "storage": await storage_info(session, prefs["backup_keep"]),
             "version": VERSION,
         }
     )

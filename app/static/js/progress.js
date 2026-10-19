@@ -60,6 +60,19 @@
       parts.push(imp.ok ? "last import: " + n.toLocaleString() + " rows added" : "last import failed: " + imp.error);
     }
     range.textContent = parts.join(" · ");
+    const st2 = d.storage;
+    const store = document.getElementById("rsStorage");
+    if (st2 && store) {
+      const mb = (n) => (n >= 1e9 ? (n / 1e9).toFixed(1) + " GB" : (n / 1e6).toFixed(n < 1e7 ? 1 : 0) + " MB");
+      const bits = [];
+      if (st2.database_bytes != null) bits.push("database " + mb(st2.database_bytes));
+      bits.push("covers " + mb(st2.covers_bytes), "NZB cache " + mb(st2.nzb_bytes));
+      bits.push("backups " + st2.backups.count + " (" + mb(st2.backups.bytes) + ")");
+      bits.push("free on disk " + mb(st2.free_bytes) + " of " + mb(st2.total_bytes));
+      bits.push("next export ≈ " + mb(st2.export_estimate_bytes));
+      store.textContent = "Storage: " + bits.join(" · ") + (st2.warning ? "  ⚠ " + st2.warning : "");
+      store.style.color = st2.warning ? "#d9534f" : "";
+    }
   }
 
   async function tick() {

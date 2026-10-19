@@ -1118,3 +1118,20 @@ async def test_the_manifest_and_service_worker_are_public_and_safe(client):
     assert '"/static/"' in body and 'method !== "GET"' in body  # only static GETs are ever cached
     page = (await c.get("/")).text
     assert 'rel="manifest"' in page and "shortcuts.js" in page
+
+
+async def test_the_status_endpoint_reports_storage_and_a_backup_size_estimate(client):
+    c, factory = client
+    await _admin(c, factory)
+    storage = (await c.get("/retrieve/status")).json()["storage"]
+    assert {
+        "covers_bytes",
+        "nzb_bytes",
+        "backups",
+        "free_bytes",
+        "total_bytes",
+        "export_estimate_bytes",
+        "warning",
+    } <= set(storage)
+    assert storage["export_estimate_bytes"] > 0  # the fixture has 8 spots
+    assert storage["free_bytes"] > 0

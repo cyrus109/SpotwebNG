@@ -24,7 +24,7 @@ from collections.abc import AsyncIterator, Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .cache import invalidate
@@ -96,6 +96,27 @@ async def export_chunks(factory: async_sessionmaker[AsyncSession]) -> AsyncItera
     out += comp.flush()
     if out:
         yield out
+
+
+async def estimate_export_bytes(session: AsyncSession, sample: int = 1000) -> int:
+    """About how big an export would be: compress a sample of each table's newest rows and
+    scale by the row count. Cheap (a few thousand rows), and good to within tens of percent."""
+    total = 0
+    for name, (model, _) in TABLES.items():
+        count = (await session.execute(select(func.count()).select_from(model))).scalar_one()
+        if not count:
+            continue
+        stmt: Any = select(model).limit(sample)
+        if hasattr(model, "id"):
+            stmt = stmt.order_by(model.id.desc())
+        rows = (await session.execute(stmt)).scalars().all()
+        cols = _columns(model)
+        text = "".join(
+            json.dumps({"t": name, "r": {c.name: _dump(getattr(r, c.name)) for c in cols}}) + "\n"
+            for r in rows
+        )
+        total += int(len(zlib.compress(text.encode(), 6)) / max(len(rows), 1) * count)
+    return total
 
 
 def _coerce_row(name: str, model: type, raw: Any) -> dict | None:
