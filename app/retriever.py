@@ -238,6 +238,12 @@ async def _store_rows(
         seen_batch.add(s.message_id)
         known = existing.get(s.message_id)
         if known is not None:
+            touched = False
+            if not known.from_hdr and s.from_hdr:
+                # Stored before signatures were kept: fill the raw material in place.
+                known.from_hdr, known.keyid = s.from_hdr, s.keyid
+                known.verified, known.spotter_id = s.verified, s.spotter_id[:16]
+                touched = True
             # Rows stored before subcats existed: fill them in place,
             # leaving enrichment (images/NZB) untouched.
             if not known.subcat_z and not known.subcat_a:
@@ -247,7 +253,8 @@ async def _store_rows(
                 known.subcat_d = pack_subcats(s.subcats.get("d", []), 128)
                 known.subcat_z = pack_subcats(s.subcats.get("z", []), 32)
                 known.spot_category = s.category
-                backfilled += 1
+                touched = True
+            backfilled += touched
             continue
 
         def _sub(letter: str, limit: int, spot=s) -> str:
@@ -267,6 +274,10 @@ async def _store_rows(
                 subcat_c=_sub("c", 64),
                 subcat_d=_sub("d", 128),
                 subcat_z=_sub("z", 32),
+                keyid=s.keyid,
+                verified=s.verified,
+                spotter_id=s.spotter_id[:16],
+                from_hdr=s.from_hdr,
                 size=s.filesize,
                 posted_at=s.stamp,
                 description=s.tag[:500] if s.tag else "",

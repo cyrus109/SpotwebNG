@@ -48,6 +48,11 @@
     const running = (d.jobs || []).filter((j) => j.status !== "done");
     if (running.length) parts.push("background jobs: " + running.map((j) => j.description + " (" + j.status + (j.processed ? ", " + j.processed.toLocaleString() : "") + ")").join(", "));
     if (d.backups && d.backups.count) parts.push(d.backups.count + " backup(s), latest " + day(d.backups.latest));
+    const sg = d.signatures;
+    if (sg && sg.verified + sg.failed > 0) {
+      const pct = Math.round((100 * sg.verified) / (sg.verified + sg.failed));
+      parts.push("signatures: " + pct + "% of signed spots verify (" + sg.failed.toLocaleString() + " failed)");
+    }
     if (d.version) parts.push("v" + d.version);
     const imp = st.last_import;
     if (imp) {

@@ -50,6 +50,7 @@ SPEC: dict[str, tuple[Any, str]] = {
     # Safe by default: an unconfigured instance must never render adult
     # covers, and only an admin can turn this off.
     "hide_adult": (True, "bool"),
+    "hide_failed_signatures": (False, "bool"),  # hide spots whose signature did not verify
     "site_name": ("SpotwebNG", "str"),
     "theme": ("liquid-glass", "str"),
 }

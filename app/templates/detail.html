@@ -17,7 +17,11 @@
       <span class="fact"><b>Posted</b> {{ spot.posted_at.strftime('%Y-%m-%d %H:%M') }}</span>
       {% if spot.nzb_segments %}<span class="fact ok"><b>NZB</b> available</span>{% endif %}
       {% if spot.imdb_id %}<span class="fact"><b>IMDb</b> <a href="https://www.imdb.com/title/tt{{ spot.imdb_id }}/" target="_blank" rel="noopener">tt{{ spot.imdb_id }}</a></span>{% endif %}
-      <span class="fact"><b>Poster</b> {{ spot.poster }}</span>
+      <span class="fact"><b>Poster</b> {{ spot.poster }}
+        {% if spot.verified == 1 %}<span class="pill sig-ok" title="Signature verified{{ ' — poster ' ~ spot.spotter_id if spot.spotter_id }}">✓ verified</span>
+        {% elif spot.verified == 2 %}<span class="pill sig-bad" title="The poster signature did not verify: possibly forged">⚠ signature failed</span>{% endif %}
+        {% if spotter_status == 'blocked' %}<span class="pill sig-bad">blocked</span>{% elif spotter_status == 'trusted' %}<span class="pill sig-ok">trusted</span>{% endif %}
+      </span>
       {% if downloaded %}<span class="fact ok"><b>✓ Downloaded</b> {{ downloaded.last_at.strftime('%Y-%m-%d %H:%M') }}{% if downloaded.count > 1 %} ({{ downloaded.count }}×){% endif %}</span>{% endif %}
     </div>
     {% if spot.description %}<div class="detail-desc">{{ spot.description }}</div>{% endif %}
@@ -25,6 +29,11 @@
       <a class="btn-glass btn-primary" href="/api?t=get&id={{ spot.id }}&apikey={{ api_key }}">⬇ Download NZB</a>
       {% if send_label %}<button class="btn-glass" type="button" id="btn-send" data-url="/spot/{{ spot.id }}/send">⇢ {{ send_label }}</button>
       <span id="send-msg" class="muted" role="status"></span>{% endif %}
+      {% if is_admin and spot.spotter_id %}
+        {% if spotter_status == 'blocked' %}<button class="btn-glass" type="button" data-spotter="{{ spot.spotter_id }}" data-status="neutral">Unblock poster</button>
+        {% else %}<button class="btn-glass" type="button" data-spotter="{{ spot.spotter_id }}" data-status="blocked" data-confirm="Block this poster? All their spots disappear everywhere.">⛔ Block poster</button>
+        {% if spotter_status != 'trusted' %}<button class="btn-glass" type="button" data-spotter="{{ spot.spotter_id }}" data-status="trusted">Trust poster</button>{% endif %}{% endif %}
+      {% endif %}
       {% if spot.website %}<a class="btn-glass" href="{{ spot.website }}" target="_blank" rel="noopener noreferrer">🔗 More info</a>{% endif %}
     </div>
     <p style="margin-top:var(--ds-space-4); color:var(--ds-text-muted); font-size:var(--ds-text-xs)">
@@ -39,7 +48,8 @@
     <header>
       <b>{{ c.poster or 'anonymous' }}</b>
       <span>{{ c.posted_at.strftime('%Y-%m-%d %H:%M') }}</span>
-      <span class="pill" title="Spotnet signatures are not verified yet">unverified</span>
+      {% if c.verified == 1 %}<span class="pill sig-ok" title="Signature verified">✓ verified</span>
+      {% else %}<span class="pill" title="No valid signature found">unverified</span>{% endif %}
     </header>
     {% if c.body_state == 1 and c.body %}<div class="comment-body">{{ c.body }}</div>
     {% elif c.body_state == 2 %}<div class="comment-body muted">Comment no longer on the server.</div>

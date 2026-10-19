@@ -65,9 +65,9 @@ def backup_sqlite(db_path: str, from_rev: str | None, to_rev: str) -> Path | Non
     return target
 
 
-def _upgrade(connection: Connection, backup_path: str | None) -> dict:
+def _upgrade(connection: Connection, backup_path: str | None, target: str = "head") -> dict:
     current = MigrationContext.configure(connection).get_current_revision()
-    head = head_revision()
+    head = head_revision() if target == "head" else target
     has_data = bool(connection.dialect.has_table(connection, "spots"))
     result = {"from": current, "to": head, "backup": None}
     if current != head:
@@ -76,20 +76,21 @@ def _upgrade(connection: Connection, backup_path: str | None) -> dict:
             connection.commit()
             made = backup_sqlite(backup_path, current, head)
             result["backup"] = str(made) if made else None
-        command.upgrade(_config(connection), "head")
+        command.upgrade(_config(connection), target)
         connection.commit()
     return result
 
 
-async def upgrade_database(engine: AsyncEngine) -> dict:
+async def upgrade_database(engine: AsyncEngine, target: str = "head") -> dict:
     """Bring the database to the current schema. Returns what was done."""
     global SCHEMA_REVISION
     db_path = engine.url.database if engine.url.get_backend_name() == "sqlite" else None
     if db_path in (None, "", ":memory:"):
         db_path = None
     async with engine.connect() as conn:
-        result = await conn.run_sync(_upgrade, db_path)
-    SCHEMA_REVISION = result["to"]
+        result = await conn.run_sync(_upgrade, db_path, target)
+    if target == "head":
+        SCHEMA_REVISION = result["to"]
     if result["from"] != result["to"]:
         logger.info(
             "database schema %s -> %s (backup: %s)", result["from"], result["to"], result["backup"]

@@ -47,35 +47,72 @@ async def test_a_fresh_database_gets_exactly_the_models_schema(tmp_path, data_di
         await engine.dispose()
 
 
+async def _install_with_old_schema(engine):
+    """A pre-0.3 database: the baseline schema with no alembic_version table, plus a spot."""
+    await migrate.upgrade_database(engine, target="0001")
+    async with engine.begin() as conn:
+        await conn.execute(text("DROP TABLE alembic_version"))
+        await conn.execute(
+            text(
+                "INSERT INTO spots (message_id, title, poster, category, size, posted_at,"
+                " subcat_a, subcat_b, subcat_c, subcat_d, subcat_z, spot_category, imdb_id,"
+                " tvmaze_id, poster_url, description, nzb_ref, enriched, website, nzb_segments)"
+                " VALUES ('<a@x>', 'Kept', '', 0, 0, '2026-01-01', '', '', '', '', '', -1, '',"
+                " '', '', '', '', 1, '', '')"
+            )
+        )
+
+
 async def test_an_install_from_before_migrations_keeps_its_data_and_is_backed_up(
     tmp_path, data_dir
 ):
     engine = _engine(tmp_path)
     try:
-        async with engine.begin() as conn:  # what every pre-0.3 boot did
-            await conn.run_sync(Base.metadata.create_all)
+        await _install_with_old_schema(engine)
+        result = await migrate.upgrade_database(engine)
+        assert result["from"] is None and result["to"] == migrate.head_revision()
+        backup = Path(result["backup"])
+        assert backup.parent == data_dir / "backups" and backup.exists()
+        con = sqlite3.connect(backup)  # the safety copy is the pre-upgrade database
+        assert con.execute("SELECT title FROM spots").fetchone() == ("Kept",)
+        assert "from_hdr" not in {r[1] for r in con.execute("PRAGMA table_info(spots)")}
+        con.close()
+        async with engine.connect() as conn:
+            row = (
+                await conn.execute(text("SELECT title, verified, keyid, from_hdr FROM spots"))
+            ).one()
+        assert tuple(row) == ("Kept", 0, -1, "")  # old rows get neutral defaults for new columns
+        assert await _schema_diff(engine) == []
+        assert len(list((data_dir / "backups").glob("pre-migrate-*"))) == 1
+        await migrate.upgrade_database(engine)  # already current: no second backup
+        assert len(list((data_dir / "backups").glob("pre-migrate-*"))) == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_each_new_revision_upgrades_an_existing_database_in_place(tmp_path, data_dir):
+    engine = _engine(tmp_path)
+    try:
+        await migrate.upgrade_database(engine, target="0002")
+        async with engine.begin() as conn:
+            await conn.execute(text("INSERT INTO settings VALUES ('theme', 'midnight')"))
             await conn.execute(
                 text(
                     "INSERT INTO spots (message_id, title, poster, category, size, posted_at,"
                     " subcat_a, subcat_b, subcat_c, subcat_d, subcat_z, spot_category, imdb_id,"
                     " tvmaze_id, poster_url, description, nzb_ref, enriched, website, nzb_segments)"
-                    " VALUES ('<a@x>', 'Kept', '', 0, 0, '2026-01-01', '', '', '', '', '', -1, '',"
+                    " VALUES ('<b@x>', 'Old', '', 0, 0, '2026-01-01', '', '', '', '', '', -1, '',"
                     " '', '', '', '', 1, '', '')"
                 )
             )
         result = await migrate.upgrade_database(engine)
-        assert result["from"] is None
-        backup = Path(result["backup"])
-        assert backup.parent == data_dir / "backups" and backup.exists()
-        con = sqlite3.connect(backup)  # the safety copy holds the pre-upgrade data
-        assert con.execute("SELECT title FROM spots").fetchone() == ("Kept",)
-        con.close()
+        assert result["from"] == "0002" and result["backup"]
         async with engine.connect() as conn:
-            assert (await conn.execute(text("SELECT title FROM spots"))).scalar_one() == "Kept"
+            assert (await conn.execute(text("SELECT title FROM spots"))).scalar_one() == "Old"
+            assert (
+                await conn.execute(text("SELECT value FROM settings"))
+            ).scalar_one() == "midnight"
         assert await _schema_diff(engine) == []
-        assert len(list((data_dir / "backups").glob("pre-migrate-*"))) == 1
-        await migrate.upgrade_database(engine)  # already current: no second backup
-        assert len(list((data_dir / "backups").glob("pre-migrate-*"))) == 1
     finally:
         await engine.dispose()
 

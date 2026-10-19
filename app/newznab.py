@@ -236,6 +236,7 @@ async def newznab(
             categories=cats,
             imdb_id=imdbid or None,
             exclude_adult=hide_adult,
+            hide_failed=bool(prefs["hide_failed_signatures"]),
             offset=offset,
             limit=limit,
         )

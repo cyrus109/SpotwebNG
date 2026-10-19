@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import Comment, UsenetState
 from .retriever import INCREMENT, NntpClient, NntpError, NntpTooLarge, _load_provider
+from .signing import verify_comment
 
 MAX_BODY = 10 * 1024
 MAX_BODY_WIRE = (
@@ -141,6 +142,40 @@ async def retrieve_comments(
         await client.quit()
 
 
+def _split_article(lines: list[str]) -> tuple[dict[str, str], list[str]]:
+    """Headers (lower-cased names) and body lines of a raw article."""
+    head: dict[str, str] = {}
+    for i, line in enumerate(lines):
+        if line == "":
+            return head, lines[i + 1 :]
+        name, _, value = line.partition(":")
+        head.setdefault(name.strip().lower(), value.strip())
+    return head, []
+
+
+def _latin1_name(raw_from: str) -> str:
+    """Poster name as Spotweb signs it: the UTF-8 text re-encoded to ISO-8859-1."""
+    name = raw_from.split("<", 1)[0].strip()
+    try:
+        return name.encode("latin-1").decode("utf-8").encode("latin-1", "replace").decode("latin-1")
+    except UnicodeError:
+        return name
+
+
+def _verify(comment: Comment, head: dict[str, str], raw_body: str) -> tuple[int, str]:
+    key = head.get("x-user-key", "")
+    modulus = re.search(r"<Modulus>([^<]+)</Modulus>", key)
+    exponent = re.search(r"<Exponent>([^<]+)</Exponent>", key)
+    return verify_comment(
+        comment.message_id,
+        head.get("x-user-signature", ""),
+        modulus.group(1).strip() if modulus else "",
+        exponent.group(1).strip() if exponent else "AQAB",
+        raw_body,
+        _latin1_name(head.get("from", "")),
+    )
+
+
 async def fetch_comment_bodies(session: AsyncSession, spot_message_id: str, limit: int = 50) -> int:
     """Fetch bodies for a spot's pending comments (state 0). Returns how many were stored."""
     pending = (
@@ -171,7 +206,7 @@ async def fetch_comment_bodies(session: AsyncSession, spot_message_id: str, limi
         for comment in pending:
             try:
                 lines = await client.multiline(
-                    f"BODY {comment.message_id}", "222", max_bytes=MAX_BODY_WIRE
+                    f"ARTICLE {comment.message_id}", "220", max_bytes=MAX_BODY_WIRE
                 )
             except NntpTooLarge:
                 comment.body_state = 2  # a mis-posted binary; the stream is desynced, stop here
@@ -183,9 +218,12 @@ async def fetch_comment_bodies(session: AsyncSession, spot_message_id: str, limi
                 continue
             except (OSError, TimeoutError):
                 break  # connection trouble: retry on the next view
-            raw = "\n".join(lines).encode("latin-1", "replace").decode("utf-8", "replace")
+            head, body_lines = _split_article(lines)
+            raw_body = "\n".join(body_lines)  # still latin-1-decoded raw bytes: what was signed
+            raw = raw_body.encode("latin-1", "replace").decode("utf-8", "replace")
             comment.body = _CONTROL_RE.sub("", raw)[:MAX_BODY]
             comment.body_state = 1
+            comment.verified, comment.spotter_id = _verify(comment, head, raw_body)
             stored += 1
             await session.commit()
     finally:

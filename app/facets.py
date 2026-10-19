@@ -21,10 +21,11 @@ from .filters import (
     visible_sections,
 )
 from .models import Spot
+from .spotters import blocked_condition
 
 
 async def _count(session: AsyncSession, conds: list) -> int:
-    stmt = select(func.count()).select_from(Spot)
+    stmt = select(func.count()).select_from(Spot).where(blocked_condition())
     for c in conds:
         stmt = stmt.where(c)
     return (await session.execute(stmt)).scalar_one()
@@ -69,7 +70,7 @@ async def option_counts(session: AsyncSession, tree: str) -> list[dict]:
 
         # One pass per dimension instead of one COUNT per code: the old loop
         # issued ~133 unindexable scans for Movies (measured at 1.2s a page).
-        stmt = select(column, func.count()).group_by(column)
+        stmt = select(column, func.count()).where(blocked_condition()).group_by(column)
         for cond in base_conds:
             stmt = stmt.where(cond)
         tally: dict[str, int] = {}

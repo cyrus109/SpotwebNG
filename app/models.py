@@ -52,6 +52,23 @@ class Spot(Base):
     # JSON list of NZB segment message-ids from the full-spot XML.
     nzb_segments: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    # Signature material (see signing.py). The raw From header is kept so verification can be
+    # redone locally if the rules change — Usenet is never re-read for it.
+    keyid: Mapped[int] = mapped_column(Integer, default=-1)
+    spotter_id: Mapped[str] = mapped_column(String(16), default="", index=True)
+    verified: Mapped[int] = mapped_column(Integer, default=0, index=True)  # 0 not evaluated
+    from_hdr: Mapped[str] = mapped_column(String(700), default="")
+
+
+class Spotter(Base):
+    """A poster identified by key (spotter_id), with the admin's verdict on them."""
+
+    __tablename__ = "spotters"
+
+    spotter_id: Mapped[str] = mapped_column(String(16), primary_key=True)
+    status: Mapped[str] = mapped_column(String(12), default="neutral")  # neutral|trusted|blocked
+    note: Mapped[str] = mapped_column(String(255), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Comment(Base):
@@ -68,6 +85,8 @@ class Comment(Base):
     body: Mapped[str] = mapped_column(Text, default="")
     # 0 = body not fetched yet, 1 = fetched, 2 = gone from the server.
     body_state: Mapped[int] = mapped_column(Integer, default=0)
+    verified: Mapped[int] = mapped_column(Integer, default=0)
+    spotter_id: Mapped[str] = mapped_column(String(16), default="")
 
 
 class Download(Base):

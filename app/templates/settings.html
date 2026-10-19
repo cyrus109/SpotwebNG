@@ -8,7 +8,7 @@
       <div class="rail-title">Settings</div>
       <div class="rail-nav">
         <a href="#all" class="rail-link" data-section="all"><span class="rail-text">All settings</span></a>
-        {% for key, label in [('usenet','Usenet provider'),('retrieval','Retrieval &amp; retention'),('status','Status &amp; backup'),('downloads','Download client'),
+        {% for key, label in [('usenet','Usenet provider'),('retrieval','Retrieval &amp; retention'),('status','Status &amp; backup'),('downloads','Download client'),('posters','Posters'),
                               ('display','Display'),('appearance','Appearance'),
                               ('api','API access'),('account','Your account'),('users','Users')] %}
         <a href="#{{ key }}" class="rail-link" data-section="{{ key }}"><span class="rail-text">{{ label | safe }}</span></a>
@@ -221,6 +221,16 @@
           <input type="checkbox" class="switch" name="hide_adult" {{ 'checked' if values.hide_adult }}>
         </div>
       </label>
+      <label class="set-row set-row-toggle">
+        <div class="set-info">
+          <span class="set-name">Hide spots with a failed signature</span>
+          <span class="set-desc">Spots whose poster signature was present but did not verify are likely forged. Spots without a signature stay visible.</span>
+        </div>
+        <div class="set-control set-control-end">
+          <input type="hidden" name="hide_failed_signatures__present" value="1">
+          <input type="checkbox" class="switch" name="hide_failed_signatures" {{ 'checked' if values.hide_failed_signatures }}>
+        </div>
+      </label>
     </div>
   </section>
 
@@ -290,6 +300,28 @@
         <div class="set-control"><button class="btn-glass" type="button" id="sabTest">Test connection</button></div>
       </div>
     </div>
+  </section>
+
+  <section class="card" id="posters">
+    <div class="card-head">
+      <div class="card-head-text">
+        <h2>Posters</h2>
+        <p class="card-sub">Block a poster from a spot's page and their spots vanish everywhere. A poster is identified by their signing key, so a new name does not help them.</p>
+      </div>
+    </div>
+    <ul class="keylist">
+      {% for p in spotters %}
+      <li class="keyrow">
+        <div class="keyrow-main">
+          <span class="keyrow-name">{{ p.name or p.spotter_id }} <code>{{ p.spotter_id }}</code></span>
+          <span class="keyrow-used">{{ p.status }} · {{ '{:,}'.format(p.spots) }} spots{{ ' · ' ~ p.note if p.note }}</span>
+        </div>
+        <button class="linkish" type="button" data-spotter="{{ p.spotter_id }}" data-status="neutral">Reset</button>
+      </li>
+      {% else %}
+      <li class="keyrow"><span class="keyrow-used">No blocked or trusted posters yet.</span></li>
+      {% endfor %}
+    </ul>
   </section>
 
   <section class="card" id="appearance">
@@ -476,4 +508,5 @@
 </div>
 {% endblock %}
 
-{% block scripts %}<script src="/static/js/settings.js?v={{ asset_v('js/settings.js') }}"></script>{% endblock %}
+{% block scripts %}<script src="/static/js/settings.js?v={{ asset_v('js/settings.js') }}"></script>
+<script src="/static/js/send.js?v={{ asset_v('js/send.js') }}"></script>{% endblock %}

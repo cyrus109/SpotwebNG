@@ -25,6 +25,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from . import spotters
 from .auth import (
     ADMIN,
     COOKIE,
@@ -47,6 +48,7 @@ from .auth import (
 )
 from .autobackup import summary as backup_summary
 from .backup import export_chunks, import_file
+from .cache import cached
 from .categories import CATEGORY_NAMES
 from .comments import comment_counts, fetch_comment_bodies
 from .config import BASE_DIR, IMAGES_DIR, get_settings, load_providers
@@ -148,6 +150,7 @@ async def home(
         since=since,
         min_size=int(minsize * 1024**3) if minsize else None,
         max_size=int(maxsize * 1024**3) if maxsize else None,
+        hide_failed=prefs["hide_failed_signatures"],
         sort=sort,
         offset=(max(page, 1) - 1) * prefs["per_page"],
         limit=prefs["per_page"],
@@ -252,6 +255,8 @@ async def detail(
         {
             "spot": spot,
             "downloaded": (await downloaded_map(session, [spot.message_id])).get(spot.message_id),
+            "spotter_status": await spotters.status_of(session, spot.spotter_id),
+            "is_admin": await is_admin(session, request.cookies.get(COOKIE)),
             "comments": comments,
             "send_label": (
                 {"sabnzbd": "Send to SABnzbd", "blackhole": "Save to black hole"}.get(
@@ -287,6 +292,24 @@ async def send_spot_route(
             pass
     result = await send_spot(session, spot, prefs)
     return JSONResponse(result, status_code=200 if result["ok"] else 502)
+
+
+@router.post("/spotter/{spotter_id}/status")
+async def spotter_status(
+    request: Request,
+    spotter_id: str,
+    status: str = Form(...),
+    note: str = Form(""),
+    session: AsyncSession = Depends(get_session),
+) -> JSONResponse:
+    """Block, trust or reset a poster (administrators only)."""
+    if not await is_admin(session, request.cookies.get(COOKIE)):
+        return JSONResponse({"ok": False, "message": "Administrators only"}, status_code=403)
+    try:
+        await spotters.set_status(session, spotter_id, status, note)
+    except ValueError:
+        return JSONResponse({"ok": False, "message": "Invalid poster or status"}, status_code=400)
+    return JSONResponse({"ok": True, "message": f"Poster marked {status}"})
 
 
 @router.post("/settings/sab/test")
@@ -371,6 +394,19 @@ async def retrieve_now(
     return JSONResponse({"ok": True, **result})
 
 
+async def _signature_stats(session: AsyncSession) -> dict:
+    rows = (
+        await session.execute(select(Spot.verified, func.count()).group_by(Spot.verified))
+    ).all()
+    tally = {status: n for status, n in rows}
+    return {
+        "verified": tally.get(1, 0),
+        "failed": tally.get(2, 0),
+        "unsigned": tally.get(3, 0),
+        "unevaluated": tally.get(0, 0),
+    }
+
+
 @router.get("/retrieve/status")
 async def retrieve_status(session: AsyncSession = Depends(get_session)) -> JSONResponse:
     """What is running now, plus what we know about the server's history."""
@@ -390,6 +426,7 @@ async def retrieve_status(session: AsyncSession = Depends(get_session)) -> JSONR
             "effective_oldest": oldest,
             "retrieve_days": prefs["retrieve_days"],
             "jobs": await job_status(session),
+            "signatures": await cached("sig-stats", 60, lambda: _signature_stats(session)),
             "backups": backup_summary(),
             "version": VERSION,
         }
@@ -683,6 +720,7 @@ async def settings_page(
             "api_keys": (await session.execute(select(ApiUser))).scalars().all(),
             "has_account": await account_exists(session),
             "users": (await session.execute(select(User).order_by(User.username))).scalars().all(),
+            "spotters": await spotters.listing(session),
             "me": await user_for_session(session, request.cookies.get(COOKIE)),
             "roles": ROLES,
             "stats": {

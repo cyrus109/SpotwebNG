@@ -9,7 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.backup import export_chunks, import_file
-from app.models import Base, Comment, Download, Setting, Spot, UsenetState
+from app.models import Base, Comment, Download, Setting, Spot, Spotter, UsenetState
 
 NOW = datetime(2026, 7, 26, 12, 0, tzinfo=UTC)
 
@@ -34,6 +34,9 @@ async def source():
                     category=2040,
                     subcat_z="z0|",
                     description="kept",
+                    from_hdr="Nick <k@h>",
+                    verified=1,
+                    spotter_id="SID123",
                     poster_url="/image/9" if i == 0 else "https://img/x.jpg",
                     enriched=1,
                 )
@@ -49,6 +52,7 @@ async def source():
             )
         )
         s.add(UsenetState(infotype="spots", cur_article=500, cur_message_id="<s4@x>"))
+        s.add(Spotter(spotter_id="SPAMID", status="blocked", note="spam"))
         s.add(Download(message_id="<s2@x>", first_at=NOW, last_at=NOW, count=3, source="send"))
         s.add(Setting(key="password", value="usenet-secret"))
         s.add(Setting(key="provider_host", value="news.example.com"))
@@ -75,11 +79,25 @@ async def test_round_trip_into_a_fresh_install(source, tmp_path):
     target, engine = await _factory()
     try:
         result = await import_file(target, path)
-        assert result["added"] == {"spots": 5, "comments": 1, "downloads": 1, "usenet_state": 1}
+        assert result["added"] == {
+            "spots": 5,
+            "comments": 1,
+            "downloads": 1,
+            "spotters": 1,
+            "usenet_state": 1,
+        }
         assert await _count(target, Spot) == 5
         async with target() as s:
             dl = (await s.execute(select(Download))).scalar_one()
             assert (dl.message_id, dl.count, dl.source) == ("<s2@x>", 3, "send")
+            sp = (await s.execute(select(Spotter))).scalar_one()
+            assert (sp.spotter_id, sp.status) == ("SPAMID", "blocked")
+            signed = (await s.execute(select(Spot).where(Spot.message_id == "<s3@x>"))).scalar_one()
+            assert (signed.verified, signed.spotter_id, signed.from_hdr) == (
+                1,
+                "SID123",
+                "Nick <k@h>",
+            )
             state = await s.get(UsenetState, "spots")
             assert state.cur_article == 500  # no need to re-read the group
             cover_lost = (

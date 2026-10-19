@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .categories import expand_categories
 from .filters import tree_conditions
 from .models import Spot
+from .spotters import blocked_condition, failed_condition
 
 # Spotnet files erotica under the z3 genre. Most of it also lands in the 6xxx
 # Newznab range, but not all — 18 spots in a real index carry z3 while sitting
@@ -53,6 +54,7 @@ async def search_spots(
     max_size: int | None = None,
     since: datetime | None = None,
     exclude_adult: bool = False,
+    hide_failed: bool = False,
     sort: str = "new",
     offset: int = 0,
     limit: int = 100,
@@ -62,7 +64,9 @@ async def search_spots(
     stmt = select(Spot)
     count_stmt = select(func.count()).select_from(Spot)
 
-    conds = []
+    conds = [blocked_condition()]  # a blocked poster is blocked everywhere
+    if hide_failed:
+        conds.append(failed_condition())
     if query:
         # Match every word independently. Release titles are dot-separated
         # ("Silo.S03E05.Memory") while clients send spaces ("Silo S03E05"), so a

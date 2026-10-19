@@ -20,6 +20,8 @@ from datetime import UTC, datetime
 from email.header import decode_header, make_header
 from email.utils import parsedate_to_datetime
 
+from .signing import verify_spot
+
 VALID_SUBCAT_LETTERS = frozenset("abcdz")
 
 # Longest run of digits we will ever convert. Guards both int()'s 4300-digit
@@ -219,6 +221,10 @@ class SpotHeader:
     stamp: datetime | None = None
     keyid: int = 0
     newznab_cat: int = 8000
+    # Raw material kept so signatures can be re-checked later without Usenet.
+    from_hdr: str = ""
+    verified: int = 0  # signing.VERIFIED / FAILED / UNSIGNED
+    spotter_id: str = ""
 
 
 def parse_xover_row(row: dict) -> SpotHeader | None:
@@ -269,7 +275,11 @@ def parse_xover_row(row: dict) -> SpotHeader | None:
         if z:
             subcats["z"] = [z]
 
+    status, _, sid = verify_spot(row.get("From", ""), title, message_id)
     return SpotHeader(
+        from_hdr=row.get("From", "")[:700],
+        verified=status,
+        spotter_id=sid,
         message_id=bracketed,
         article_number=int(row.get("Number", 0)),
         title=title,

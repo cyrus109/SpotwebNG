@@ -223,6 +223,22 @@ already exist are skipped, nothing is overwritten, and bookmarks are only taken 
 install has none. Cover images are not part of the file; spots that had one are fetched
 again in the background. Both are admin-only.
 
+## Signatures and posters
+
+Spotnet spots are signed by their poster. From this version on SpotwebNG verifies those RSA
+signatures (ported from Spotweb: trusted keys for key ids 2/3/4, self-signed keys for id 7,
+plus the hashcash and user signature) and shows **✓ verified** or **⚠ signature failed** on the
+spot page; comments are verified when their text is loaded. *Hide spots with a failed signature*
+removes likely forgeries; unsigned spots are left alone. The verification rate is shown in
+*Status & backup* — if it is near zero something is off, and the stored raw header lets a
+background job re-check every spot locally without touching Usenet.
+
+A verified self-signed poster has a stable **poster id** (a hash of their key). Admins can
+**block** a poster from any spot page: their spots disappear from listings, search, counts and the
+API, and a new nickname does not help. *Settings → Posters* lists blocked/trusted posters.
+Spots stored by earlier versions have no raw header; a re-scan (*Reset retrieval position*) fills
+it in place without touching covers or NZBs.
+
 ## Downloaded checkmarks
 
 Spots whose NZB has been delivered — to a Newznab client such as Radarr or Sonarr, through the

@@ -66,9 +66,10 @@ async def db():
 class CommentServer(FakeNewsServer):
     """FakeNewsServer plus BODY <msgid>."""
 
-    def __init__(self, articles, bodies):
+    def __init__(self, articles, bodies, headers=None):
         super().__init__(first=1, articles=articles)
         self.bodies = bodies
+        self.headers = headers or {}  # message-id -> extra header bytes
 
     async def _handle(self, reader, writer):
         # Intercept BODY, delegate everything else to the parent protocol handler.
@@ -76,10 +77,12 @@ class CommentServer(FakeNewsServer):
 
         async def readline():
             line = await orig_readline()
-            if line.upper().startswith(b"BODY "):
+            if line.upper().startswith((b"BODY ", b"ARTICLE ")):
                 mid = line.decode().strip().split(" ", 1)[1]
                 if mid in self.bodies:
-                    writer.write(b"222 0 body\r\n")
+                    writer.write(b"220 0 article\r\n")
+                    writer.write(b"From: Al <k@h>\r\nSubject: Re: x\r\n")
+                    writer.write(self.headers.get(mid, b"") + b"\r\n")
                     writer.write(self.bodies[mid] + b"\r\n.\r\n")
                 else:
                     writer.write(b"430 no such article\r\n")
@@ -213,5 +216,43 @@ async def test_an_oversized_body_is_cut_off_while_reading(db):
             assert await fetch_comment_bodies(session, "<s1@spot.example>") == 0
             c = (await session.execute(select(Comment))).scalar_one()
         assert c.body == "" and c.body_state == 2
+    finally:
+        await server.stop()
+
+
+async def test_comment_signatures_are_verified_when_the_article_is_read(db):
+    import base64
+
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.asymmetric import padding, rsa
+
+    key = rsa.generate_private_key(public_exponent=65537, key_size=1024)
+    n = key.public_key().public_numbers().n
+    modulus = base64.b64encode(n.to_bytes((n.bit_length() + 7) // 8, "big")).decode()
+    good, forged = "<s1.1.a.b@spot.example>", "<s1.2.c.d@spot.example>"
+
+    def signed(mid, sign_for):
+        sig = key.sign(sign_for.encode(), padding.PKCS1v15(), hashes.SHA1())
+        sig_b64 = base64.b64encode(sig).decode().replace("/", "-s").replace("+", "-p")
+        xml = f"<RSAKeyValue><Modulus>{modulus}</Modulus><Exponent>AQAB</Exponent></RSAKeyValue>"
+        return f"X-User-Key: {xml}\r\nX-User-Signature: {sig_b64}\r\n".encode()
+
+    articles = {1: _line(1, good), 2: _line(2, forged)}
+    server = CommentServer(
+        articles,
+        {good: b"hello", forged: b"hello"},
+        {good: signed(good, good), forged: signed(forged, "<someone-else@x>")},
+    )
+    await server.start()
+    await _configure(db, server.port)
+    try:
+        async with db() as session:
+            await retrieve_comments(session, "free.usenet", 100)
+            await fetch_comment_bodies(session, "<s1@spot.example>")
+            rows = {
+                c.message_id: c for c in (await session.execute(select(Comment))).scalars().all()
+            }
+        assert rows[good].verified == 1 and rows[good].spotter_id
+        assert rows[forged].verified == 2 and rows[forged].spotter_id == ""
     finally:
         await server.stop()
