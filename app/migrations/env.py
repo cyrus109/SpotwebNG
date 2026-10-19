@@ -13,7 +13,7 @@ context.configure(
     compare_type=True,
     # FTS5 keeps its own shadow tables; they are not part of the models.
     include_object=lambda obj, name, type_, reflected, compare_to: (
-        not (type_ == "table" and name.startswith("spots_fts"))
+        not (type_ == "table" and (name or "").startswith("spots_fts"))
     ),
 )
 with context.begin_transaction():

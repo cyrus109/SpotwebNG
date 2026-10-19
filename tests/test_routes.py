@@ -1010,3 +1010,111 @@ async def test_the_arr_test_endpoint_lists_profiles_and_roots_and_hides_the_key(
     assert (
         await c.post("/settings/arr/test", data={"kind": "radarr", "url": "javascript:alert(1)"})
     ).json()["ok"] is False
+
+
+# --- scoped API keys ---------------------------------------------------------------
+
+
+async def test_a_download_only_key_can_fetch_nzbs_but_not_search_and_calls_are_counted(
+    client, monkeypatch
+):
+    from sqlalchemy import select
+
+    async def real_nzb(session, spot):
+        return b"<nzb/>"
+
+    monkeypatch.setattr("app.newznab._real_nzb", real_nzb)
+    c, factory = client
+    async with factory() as s:
+        s.add(ApiUser(name="script", api_key="d" * 32, scope="download"))
+        await s.commit()
+    spot_id = await _first_spot_id(factory)
+    ok = await c.get(f"/api?t=get&id={spot_id}&apikey={'d' * 32}")
+    assert ok.status_code == 200 and ok.content == b"<nzb/>"
+    denied = await c.get(f"/api?t=search&q=Spot&apikey={'d' * 32}")
+    assert "may only download" in denied.text and "<item>" not in denied.text
+    assert 'code="100"' in denied.text
+    assert (
+        "<item>" in (await c.get(f"/api?t=search&q=Spot&apikey={KEY}")).text
+    )  # the full key still searches
+    async with factory() as s:
+        row = (await s.execute(select(ApiUser).where(ApiUser.api_key == "d" * 32))).scalar_one()
+    assert row.requests == 2 and row.last_used is not None
+
+
+async def test_new_keys_default_to_the_least_privilege(client):
+    from sqlalchemy import select
+
+    c, factory = client
+    await _admin(c, factory)
+    await c.post("/settings/apikey", data={"name": "a", "scope": "full"})
+    await c.post("/settings/apikey", data={"name": "b", "scope": "superuser"})
+    await c.post("/settings/apikey", data={"name": "c"})
+    async with factory() as s:
+        scopes = {k.name: k.scope for k in (await s.execute(select(ApiUser))).scalars().all()}
+    assert scopes["a"] == "full" and scopes["b"] == "download" and scopes["c"] == "download"
+    page = (await c.get("/settings")).text
+    assert "Download only" in page and "calls" in page
+
+
+# --- statistics and duplicate grouping -----------------------------------------------
+
+
+async def test_the_stats_page_counts_visible_spots_only_and_renders_charts(with_adult):
+    c, factory = with_adult
+    page = (await c.get("/stats")).text
+    assert "Spots posted per day" in page and page.count("<svg") >= 2
+    assert "<b>8</b>" in page  # 8 normal spots; the two adult ones are not counted
+    assert "Movies" in page or "TV" in page  # category mix by parent category
+
+
+def test_chart_geometry_scales_to_the_tallest_bar():
+    from app.stats import bars, series
+
+    rects = bars([0, 5, 10])
+    assert [r["h"] for r in rects] == [0, 60.0, 120.0] and rects[2]["y"] == 0
+    assert bars([]) == [] and all(r["h"] == 0 for r in bars([0, 0]))
+    assert series({"2026-01-02": 3}, ["2026-01-01", "2026-01-02"]) == [0, 3]
+
+
+async def test_duplicate_releases_show_a_count_and_a_suggested_best_on_the_spot_page(client):
+    from sqlalchemy import select
+
+    c, factory = client
+    async with factory() as s:
+        spots = (await s.execute(select(Spot).order_by(Spot.id))).scalars().all()
+        spots[0].title, spots[0].title_key = "Dune 2024 1080p BluRay", "dune 2024"
+        spots[1].title, spots[1].title_key = "Dune 2024 2160p BluRay", "dune 2024"
+        await s.commit()
+        first, second = spots[0].id, spots[1].id
+    assert "×2" in (await c.get("/")).text
+    page = (await c.get(f"/spot/{first}")).text
+    assert "Other releases of this title (1)" in page and "★ suggested" in page  # the 2160p one
+    assert "highest-quality release" in (await c.get(f"/spot/{second}")).text
+
+
+# --- installable app (PWA) -------------------------------------------------------------
+
+
+async def test_the_manifest_and_service_worker_are_public_and_safe(client):
+    import json
+
+    c, _ = client  # signed out: no cookie
+    manifest = await c.get("/manifest.webmanifest")
+    assert manifest.status_code == 200 and manifest.headers["content-type"].startswith(
+        "application/manifest+json"
+    )
+    data = json.loads(manifest.text)
+    assert data["display"] == "standalone" and {i["sizes"] for i in data["icons"]} >= {
+        "192x192",
+        "512x512",
+    }
+    for icon in data["icons"]:
+        assert (await c.get(icon["src"])).status_code == 200
+    worker = await c.get("/sw.js")
+    assert worker.status_code == 200 and worker.headers["service-worker-allowed"] == "/"
+    assert "no-cache" in worker.headers["cache-control"]
+    body = worker.text
+    assert '"/static/"' in body and 'method !== "GET"' in body  # only static GETs are ever cached
+    page = (await c.get("/")).text
+    assert 'rel="manifest"' in page and "shortcuts.js" in page

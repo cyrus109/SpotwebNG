@@ -16,7 +16,7 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -182,7 +182,7 @@ app.include_router(web_router)
 
 # Paths that must stay reachable without a browser session: the Newznab API
 # authenticates with its own key, and the rest are needed to log in at all.
-OPEN_PREFIXES = ("/api", "/static", "/healthz", "/login")
+OPEN_PREFIXES = ("/api", "/static", "/healthz", "/login", "/sw.js", "/manifest.webmanifest")
 # Configuration surfaces — a viewer has no business here.
 ADMIN_PREFIXES = ("/settings", "/setup", "/retrieve", "/watchlists")
 
@@ -231,6 +231,23 @@ async def csrf_cookie(request: Request, call_next):
     if fresh:
         response.set_cookie(PRE_SESSION_COOKIE, fresh, httponly=True, samesite="lax")
     return response
+
+
+@app.get("/sw.js", include_in_schema=False)
+async def service_worker() -> FileResponse:
+    """Served from the root so its scope covers the whole app; never cached by the browser."""
+    return FileResponse(
+        BASE_DIR / "static" / "sw.js",
+        media_type="text/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
+
+
+@app.get("/manifest.webmanifest", include_in_schema=False)
+async def web_manifest() -> FileResponse:
+    return FileResponse(
+        BASE_DIR / "static" / "manifest.webmanifest", media_type="application/manifest+json"
+    )
 
 
 @app.get("/healthz")

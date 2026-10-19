@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Statistics — {{ app_name }}{% endblock %}
+
+{% block rail %}
+<nav class="rail" id="rail" aria-label="Statistics">
+  <div class="rail-scroll"><div class="rail-sec"><div class="rail-title">Statistics</div>
+    <div class="rail-nav"><a href="/" class="rail-link"><span class="rail-text">← Back to browsing</span></a></div></div></div>
+</nav>
+{% endblock %}
+
+{% macro chart(title, values, rects, note) %}
+<section class="card">
+  <div class="card-head"><div class="card-head-text"><h2>{{ title }}</h2><p class="card-sub">{{ note }}</p></div></div>
+  <svg class="chart" viewBox="0 0 720 120" preserveAspectRatio="none" role="img" aria-label="{{ title }}">
+    {% for r in rects %}<rect x="{{ r.x }}" y="{{ r.y }}" width="{{ r.w }}" height="{{ r.h }}" rx="1"><title>{{ r.v }}</title></rect>{% endfor %}
+  </svg>
+  <div class="chart-axis"><span>{{ s.days[0] }}</span><span>{{ s.days[-1] }}</span></div>
+</section>
+{% endmacro %}
+
+{% block content %}
+<div class="settings-wrap">
+  <section class="card">
+    <div class="card-head"><div class="card-head-text"><h2>Overview</h2></div></div>
+    <div class="stat-tiles">
+      <div class="stat-tile"><b>{{ '{:,}'.format(s.spots) }}</b><span>spots</span></div>
+      <div class="stat-tile"><b>{{ '{:,}'.format(s.comments) }}</b><span>comments</span></div>
+      <div class="stat-tile"><b>{{ '{:,}'.format(s.downloads) }}</b><span>downloaded</span></div>
+      <div class="stat-tile"><b>{{ db_size }}</b><span>on disk</span></div>
+    </div>
+  </section>
+  {{ chart('Spots posted per day', s.spots_per_day, spot_bars, 'Last 90 days') }}
+  {{ chart('Downloads per day', s.downloads_per_day, download_bars, 'NZBs delivered to a client or downloader, last 90 days') }}
+  <section class="card">
+    <div class="card-head"><div class="card-head-text"><h2>Categories</h2></div></div>
+    <ul class="keylist">{% for name, n in s.categories %}<li class="keyrow"><span class="keyrow-name">{{ name }}</span><span class="keyrow-used">{{ '{:,}'.format(n) }}</span></li>{% endfor %}</ul>
+  </section>
+  <section class="card">
+    <div class="card-head"><div class="card-head-text"><h2>Most active posters</h2></div></div>
+    <ul class="keylist">{% for name, n in s.top_posters %}<li class="keyrow"><span class="keyrow-name">{{ name }}</span><span class="keyrow-used">{{ '{:,}'.format(n) }} spots</span></li>{% else %}<li class="keyrow"><span class="keyrow-used">No data yet.</span></li>{% endfor %}</ul>
+  </section>
+  <p class="hint">Updated every few minutes. Adult content and blocked posters are left out.</p>
+</div>
+{% endblock %}

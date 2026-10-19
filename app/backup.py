@@ -46,7 +46,7 @@ _ID_RE = re.compile(r"^<[^\s<>@]+@[^\s<>@]+>$")
 _SEGMENT_RE = re.compile(r"^[^\s<>]{1,255}$")
 # Not exported: ids differ per install, timestamps are regenerated.
 _SKIP = {"id", "created_at", "last_retrieved"}
-TABLES: dict[str, tuple[type, str]] = {
+TABLES: dict[str, tuple[Any, str]] = {
     "spots": (Spot, "message_id"),
     "comments": (Comment, "message_id"),
     "downloads": (Download, "message_id"),
@@ -78,7 +78,7 @@ async def export_chunks(factory: async_sessionmaker[AsyncSession]) -> AsyncItera
             has_id = hasattr(model, "id")
             last_id = 0
             while True:
-                stmt = select(model)
+                stmt: Any = select(model)
                 if has_id:
                     stmt = stmt.where(model.id > last_id).order_by(model.id).limit(CHUNK)
                 rows = (await session.execute(stmt)).scalars().all()

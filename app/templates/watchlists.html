@@ -32,8 +32,10 @@
           <div class="set-control"><select id="w-preset" data-ui-select aria-label="Category preset">
             {% for s in sections %}<option value="{{ s.tree }}">{{ s.label }}</option>{% endfor %}
           </select><input type="hidden" id="w-tree" name="tree" value=""></div></div>
-        <div class="set-row"><div class="set-info"><span class="set-name">Size</span><span class="set-desc">GB, 0 = no limit</span></div>
-          <div class="set-control input-unit"><input type="number" min="0" step="0.1" name="min_gb" id="w-min" value="0"><span class="unit">to</span><input type="number" min="0" step="0.1" name="max_gb" id="w-max" value="0"><span class="unit">GB</span></div></div>
+        <div class="set-row"><div class="set-info"><label class="set-name" for="w-min">Smallest size</label><span class="set-desc">0 = no limit</span></div>
+          <div class="set-control input-unit"><input type="number" min="0" step="0.1" name="min_gb" id="w-min" value="0"><span class="unit">GB</span></div></div>
+        <div class="set-row"><div class="set-info"><label class="set-name" for="w-max">Largest size</label><span class="set-desc">0 = no limit</span></div>
+          <div class="set-control input-unit"><input type="number" min="0" step="0.1" name="max_gb" id="w-max" value="0"><span class="unit">GB</span></div></div>
         <div class="set-row"><div class="set-info"><label class="set-name" for="w-action">When something matches</label></div>
           <div class="set-control"><select id="w-action" name="action" data-ui-select>
             <option value="notify">Notify me</option>

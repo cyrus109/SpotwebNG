@@ -50,6 +50,20 @@
     </p>
   </div>
 </div>
+{% if others %}
+<section class="comments" id="releases">
+  <h2>Other releases of this title ({{ others | length }})</h2>
+  <ul class="keylist">
+    {% for o in others %}
+    <li class="keyrow">
+      <div class="keyrow-main"><a href="/spot/{{ o.id }}">{{ o.title }}</a>
+        <span class="keyrow-used">{{ o.size | gb }} · {{ o.posted_at.strftime('%Y-%m-%d') }}{% if o.id == best_id %} · <b>★ suggested</b>{% endif %}</span></div>
+    </li>
+    {% endfor %}
+  </ul>
+  {% if best_id == spot.id %}<p class="muted">★ This is the highest-quality release of the group.</p>{% endif %}
+</section>
+{% endif %}
 <section class="comments" id="comments">
   <h2>Comments ({{ comments | length }})</h2>
   {% for c in comments %}

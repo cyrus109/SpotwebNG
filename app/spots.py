@@ -56,7 +56,7 @@ _FTS_TOKEN = re.compile(r"[0-9A-Za-zÀ-ÿ]+")
 def fts_match(query: str) -> str | None:
     """An FTS5 MATCH expression for a free-text query: every word must start a word in the
     title or description. None when a word is too short to index sensibly (use LIKE then)."""
-    parts = []
+    parts: list[str] = []
     for term in query.split():
         tokens = _FTS_TOKEN.findall(term)
         if not tokens:

@@ -11,7 +11,7 @@ import asyncio
 from pathlib import Path
 
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from .autobackup import make_backup
 from .cache import invalidate
@@ -20,6 +20,12 @@ from .jobs import reset_jobs, run_jobs
 from .models import Comment, Download, Setting, Spot, UsenetState
 from .progress import KEY as STATUS_KEY
 from .retention import prune_old_spots
+
+
+def _rows(result: object) -> int:
+    """Rows affected by a DML statement (CursorResult has it; the typing stubs say Result)."""
+    return getattr(result, "rowcount", 0) or 0
+
 
 _tasks: set[asyncio.Task] = set()  # keep references to fire-and-forget runs
 ACTIONS = (
@@ -77,11 +83,12 @@ async def _run(session: AsyncSession, action: str) -> str:
         await session.commit()
         files = await asyncio.to_thread(_unlink_dir, IMAGES_DIR, ids)
         files += await asyncio.to_thread(_unlink_dir, NZB_DIR, ids)
-        return f"Removed {res.rowcount or 0:,} orphan comments and {files:,} stale cached files"
+        return f"Removed {(getattr(res, 'rowcount', 0) or 0):,} orphan comments and {files:,} stale cached files"
 
     if action == "vacuum":
         await session.commit()  # end any open transaction: VACUUM can't run inside one
         engine = session.bind
+        assert isinstance(engine, AsyncEngine)
         async with engine.connect() as conn:
             conn = await conn.execution_options(isolation_level="AUTOCOMMIT")
             await conn.exec_driver_sql("VACUUM")
@@ -97,7 +104,7 @@ async def _run(session: AsyncSession, action: str) -> str:
         res = await session.execute(delete(Comment))
         await session.execute(delete(UsenetState).where(UsenetState.infotype == "comments"))
         await session.commit()
-        return f"Deleted {res.rowcount or 0:,} comments"
+        return f"Deleted {(getattr(res, 'rowcount', 0) or 0):,} comments"
 
     if action == "backup-now":
         factory = async_sessionmaker(session.bind, expire_on_commit=False)
@@ -114,7 +121,7 @@ async def _run(session: AsyncSession, action: str) -> str:
     if action == "forget-downloads":
         res = await session.execute(delete(Download))
         await session.commit()
-        return f"Forgot {res.rowcount or 0:,} downloads"
+        return f"Forgot {(getattr(res, 'rowcount', 0) or 0):,} downloads"
 
     if action == "wipe":
         spots = await session.execute(delete(Spot))
@@ -124,6 +131,6 @@ async def _run(session: AsyncSession, action: str) -> str:
         await session.commit()
         files = await asyncio.to_thread(_unlink_dir, IMAGES_DIR, None)
         files += await asyncio.to_thread(_unlink_dir, NZB_DIR, None)
-        return f"Deleted {spots.rowcount or 0:,} spots and {files:,} cached files; starting from zero (download history kept)"
+        return f"Deleted {(getattr(spots, 'rowcount', 0) or 0):,} spots and {files:,} cached files; starting from zero (download history kept)"
 
     raise ValueError(f"Unknown action: {action}")

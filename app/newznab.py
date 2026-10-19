@@ -84,18 +84,16 @@ def _error(code: int, description: str) -> Response:
     return _xml_response(root)
 
 
-async def _touch_key(session: AsyncSession, key: str) -> None:
+async def _authenticate(apikey: str, session: AsyncSession) -> ApiUser | None:
+    """The key's row, with last-use and the request counter updated; None if unknown."""
     row = (
-        await session.execute(select(ApiUser).where(ApiUser.api_key == key))
+        await session.execute(select(ApiUser).where(ApiUser.api_key == apikey))
     ).scalar_one_or_none()
     if row is not None:
         row.last_used = datetime.now(UTC)
+        row.requests = (row.requests or 0) + 1
         await session.commit()
-
-
-async def _valid_key(apikey: str, session: AsyncSession) -> bool:
-    res = await session.execute(select(ApiUser).where(ApiUser.api_key == apikey))
-    return res.scalar_one_or_none() is not None
+    return row
 
 
 def _caps_xml(hide_adult: bool = False) -> Response:
@@ -185,9 +183,11 @@ async def newznab(
     if t in ("caps", "c"):
         return _caps_xml(hide_adult)
 
-    if not apikey or not await _valid_key(apikey, session):
+    key = await _authenticate(apikey, session) if apikey else None
+    if key is None:
         return _error(100, "Incorrect user credentials")
-    await _touch_key(session, apikey)
+    if key.scope == "download" and t not in ("get", "g"):
+        return _error(100, "This key may only download NZBs")
 
     base_url = str(request.base_url).rstrip("/")
 

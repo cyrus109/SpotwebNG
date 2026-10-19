@@ -27,7 +27,7 @@ async def _adult(session: AsyncSession) -> int:
         .execution_options(synchronize_session=False)
     )
     await session.commit()
-    return result.rowcount or 0
+    return getattr(result, "rowcount", 0) or 0
 
 
 @register("title-keys", 1, "Grouping duplicate releases")

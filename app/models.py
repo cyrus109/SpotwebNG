@@ -168,6 +168,10 @@ class ApiUser(Base):
     api_key: Mapped[str] = mapped_column(String(128), unique=True, index=True)
     # Stamped on each authenticated API call so a key can be safely retired.
     last_used: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    scope: Mapped[str] = mapped_column(
+        String(12), default="full"
+    )  # full | download (NZB fetch only)
+    requests: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

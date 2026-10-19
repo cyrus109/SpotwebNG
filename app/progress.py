@@ -62,6 +62,8 @@ def history_percent(status: dict[str, Any]) -> float | None:
     if status.get("days_reached_for"):
         return 100.0  # the day limit ended the walk
     first, last, floor = status.get("group_first"), status.get("group_last"), status.get("floor")
-    if not all(isinstance(v, int) for v in (first, last, floor)) or last <= first:
+    if not (isinstance(first, int) and isinstance(last, int) and isinstance(floor, int)):
+        return None
+    if last <= first:
         return None
     return round(max(0.0, min(100.0, (last - floor) / (last - first) * 100)), 1)

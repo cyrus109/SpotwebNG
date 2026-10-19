@@ -239,6 +239,20 @@ API, and a new nickname does not help. *Settings → Posters* lists blocked/trus
 Spots stored by earlier versions have no raw header; a re-scan (*Reset retrieval position*) fills
 it in place without touching covers or NZBs.
 
+## Duplicates, statistics and shortcuts
+
+- **Duplicate releases** — the same title posted in several qualities shares a normalised key.
+  The grid shows ×N on such cards, and a spot page lists the other releases with a suggested best
+  one (highest resolution, then the better source, then the larger file).
+- **Statistics** (📊 in the top bar) — spots and downloads per day, category mix, the most active
+  posters and database size; cached for a few minutes, adult content and blocked posters excluded.
+- **API key scopes** — keys are *Full* (search + download, for Radarr/Sonarr/Prowlarr) or
+  *Download only* (NZB fetch by id, for scripts). Settings shows each key's call count and last use.
+- **Installable app and keyboard** — SpotwebNG ships a web-app manifest and a service worker that
+  caches only the static shell (never pages or API responses), so it can be installed from the browser
+  menu (service workers need HTTPS or localhost). Keys: `/` search, `g` grid/table, `j`/`k` move
+  between spots, `Enter` open, `?` help.
+
 ## Downloaded checkmarks
 
 Spots whose NZB has been delivered — to a Newznab client such as Radarr or Sonarr, through the

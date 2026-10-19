@@ -485,10 +485,10 @@
       {% for k in api_keys %}
       <li class="keyrow">
         <div class="keyrow-main">
-          <span class="keyrow-name">{{ k.name }}</span>
+          <span class="keyrow-name">{{ k.name }} <span class="pill" title="{{ 'Can search and download' if k.scope == 'full' else 'Can only download NZBs by id' }}">{{ k.scope }}</span></span>
           <code class="keyrow-key">{{ k.api_key[:8] }}<span class="mask">••••••••</span>{{ k.api_key[-4:] }}</code>
         </div>
-        <span class="keyrow-used">{{ k.last_used.strftime('%d %b %H:%M') if k.last_used else 'never used' }}</span>
+        <span class="keyrow-used">{{ '{:,}'.format(k.requests or 0) }} calls · {{ k.last_used.strftime('%d %b %H:%M') if k.last_used else 'never used' }}</span>
         <button class="copy-btn" type="button" data-copy="{{ k.api_key }}" title="Copy full key">Copy</button>
         <form method="post" action="/settings/apikey/delete" onsubmit="return confirm('Revoke {{ k.name }}? Clients using it stop working immediately.')">
           <input type="hidden" name="key_id" value="{{ k.id }}">
@@ -499,6 +499,10 @@
     </ul>
     <form method="post" action="/settings/apikey" class="inline-form">
       <input type="text" name="name" placeholder="Client name (e.g. Radarr)" required>
+      <select name="scope" aria-label="Key scope">
+        <option value="full">Full (search + download) — Radarr, Sonarr, Prowlarr</option>
+        <option value="download">Download only — scripts that fetch known NZBs</option>
+      </select>
       <button class="btn-glass" type="submit">Create key</button>
     </form>
     <div class="hint card-footnote">Newznab URL for clients: <code>{{ base_url }}/api</code></div>

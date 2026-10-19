@@ -62,8 +62,11 @@ def spot_row(src: dict) -> dict | None:
     posted = _stamp(src.get("stamp"))
     if not message_id or not posted or not str(src.get("title") or "").strip():
         return None
+    raw_category = src.get("category")
+    if raw_category is None:
+        return None
     try:
-        category = int(src.get("category"))
+        category = int(raw_category)
     except (TypeError, ValueError):
         return None
     subs = _subcats(src)

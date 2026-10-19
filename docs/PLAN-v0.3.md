@@ -102,6 +102,14 @@ Deploying a new version must cost seconds, and upgrading must never discard retr
 - API keys with scope (`full` / `download`) + request counters.
 - Installable PWA (manifest, service worker for the shell) and keyboard shortcuts (`/`, `g`, `j/k`, `?`).
 
+## Status
+
+All nine milestones are implemented (migrations/jobs/backups/CI image, encrypted secrets,
+signatures + posters, performance, health checks, watchlists/notifications, Radarr/Sonarr,
+Spotweb import, stats/duplicates/scoped keys/PWA). Not verified in this environment: the Docker image build
+(no daemon available), service-worker registration (the embedded browser refuses it), and signature
+verification against real Spotnet data (tested against our own signer and Spotweb's documented algorithm).
+
 ## Order and rules
 M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Each milestone: implement, tests, `ruff`,
 full `pytest`, README/docs, commit. Migrations are additive; each new table/column ships

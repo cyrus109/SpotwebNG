@@ -56,6 +56,8 @@ from .csrf import csrf_context, verify_csrf
 from .db import SessionLocal, get_session
 from .downloader import check_sabnzbd, send_spot
 from .downloads import downloaded_map
+from .duplicates import best as dup_best
+from .duplicates import release_counts, siblings
 from .facets import option_counts, section_counts, section_dimensions
 from .filters import (
     FILTER_SECTIONS,
@@ -82,6 +84,8 @@ from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
 from .secrets_store import SECRET_KEYS, all_settings, encrypt, public_settings
 from .settings_store import backfill_plan, load_settings, save_settings
 from .spots import get_spot, is_adult_spot, search_spots
+from .stats import bars as stats_bars
+from .stats import collect as stats_collect
 from .version import VERSION
 from .watch import ACTIONS as watch_actions
 from .watch import new_watch
@@ -192,6 +196,7 @@ async def home(
             "comment_counts": await comment_counts(session, [s.message_id for s in rows]),
             "downloaded": await downloaded_map(session, [s.message_id for s in rows]),
             "in_library": await library_marks(prefs, rows),
+            "releases": await release_counts(session, rows, bool(prefs["hide_adult"])),
             "total": total,
             "q": q,
             "cat": cat,
@@ -261,7 +266,7 @@ async def detail(
         # Fetch the full spot (description/image/NZB) the first time it's viewed.
         try:
             await enrich_new_spots(session, images_dir=IMAGES_DIR, limit=1, only_id=spot_id)
-            spot = await get_spot(session, spot_id)
+            spot = (await get_spot(session, spot_id)) or spot
         except Exception:
             pass
     if prefs["retrieve_comments"]:
@@ -280,6 +285,7 @@ async def detail(
         .scalars()
         .all()
     )
+    others = await siblings(session, spot, bool(prefs["hide_adult"]))
     api_user = (await session.execute(select(ApiUser))).scalars().first()
     return templates.TemplateResponse(
         request,
@@ -289,6 +295,8 @@ async def detail(
             "downloaded": (await downloaded_map(session, [spot.message_id])).get(spot.message_id),
             "spotter_status": await spotters.status_of(session, spot.spotter_id),
             "in_library": bool(await library_marks(prefs, [spot])),
+            "others": others,
+            "best_id": (dup_best([spot, *others]) or spot).id if others else None,
             "arr_kind": kind_for(spot),
             "arr_ready": arr_configured(prefs, kind_for(spot))
             and bool(spot.imdb_id or spot.tvmaze_id),
@@ -345,7 +353,7 @@ async def send_spot_route(
     if spot.enriched == 0:
         try:
             await enrich_new_spots(session, images_dir=IMAGES_DIR, limit=1, only_id=spot_id)
-            spot = await get_spot(session, spot_id)
+            spot = (await get_spot(session, spot_id)) or spot
         except Exception:
             pass
     result = await send_spot(session, spot, prefs, force=force == "1")
@@ -366,6 +374,29 @@ def _watch_values(
         "max_size": int(max(max_gb, 0) * 1024**3),
         "action": action,
     }
+
+
+@router.get("/stats", response_class=HTMLResponse)
+async def stats_page(
+    request: Request, session: AsyncSession = Depends(get_session)
+) -> HTMLResponse:
+    from .config import SPOT_DATA_DIR
+
+    prefs = await load_settings(session)
+    hide = bool(prefs["hide_adult"])
+    data = await cached(f"stats:{hide}", 300, lambda: stats_collect(session, hide))
+    return templates.TemplateResponse(
+        request,
+        "stats.html",
+        {
+            "s": data,
+            "spot_bars": stats_bars(data["spots_per_day"]),
+            "download_bars": stats_bars(data["downloads_per_day"]),
+            "db_size": _dir_size(SPOT_DATA_DIR),
+            "app_name": get_settings().app_name,
+            "theme": prefs["theme"],
+        },
+    )
 
 
 @router.get("/watchlists", response_class=HTMLResponse)
@@ -994,8 +1025,19 @@ async def settings_save(request: Request, session: AsyncSession = Depends(get_se
 
 
 @router.post("/settings/apikey")
-async def settings_add_key(name: str = Form(...), session: AsyncSession = Depends(get_session)):
-    session.add(ApiUser(name=name.strip()[:128] or "client", api_key=secrets.token_hex(16)))
+async def settings_add_key(
+    name: str = Form(...),
+    scope: str = Form("download"),
+    session: AsyncSession = Depends(get_session),
+):
+    # Anything but an explicit "full" gets the least-privileged key.
+    session.add(
+        ApiUser(
+            name=name.strip()[:128] or "client",
+            api_key=secrets.token_hex(16),
+            scope="full" if scope == "full" else "download",
+        )
+    )
     await session.commit()
     return RedirectResponse("/settings#api", status_code=303)
 

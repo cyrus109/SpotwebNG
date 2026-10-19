@@ -76,6 +76,7 @@ async def run_jobs(factory: async_sessionmaker[AsyncSession], pause: float = 0.0
                     async with factory() as session:
                         touched = await job.step(session)
                         state = await _state(session, job.name)
+                        assert state is not None  # created at the start of this job's run
                         state.processed += touched
                         state.updated_at = datetime.now(UTC)
                         if touched == 0:
@@ -117,7 +118,7 @@ async def job_status(session: AsyncSession) -> list[dict]:
             {
                 "name": job.name,
                 "description": job.description,
-                "status": "pending" if stale else row.status,
+                "status": "pending" if row is None or stale else row.status,
                 "processed": row.processed if row else 0,
                 "detail": row.detail if row else "",
             }

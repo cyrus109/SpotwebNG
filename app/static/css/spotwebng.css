@@ -856,3 +856,12 @@ a { color: inherit; text-decoration: none; }
 .sig-ok { color: #1f9d55; }
 .sig-bad { color: #d9534f; }
 .lib-badge { position: absolute; top: .5rem; right: 2.4rem; z-index: 2; font-size: 1.05rem; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+.rel-badge { font-weight: 700; }
+/* stats */
+.stat-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr)); gap: var(--ds-space-4, 1rem); }
+.stat-tile { display: grid; gap: .2rem; padding: var(--ds-space-3, .75rem); border-radius: var(--ds-radius-md, 12px); background: rgba(255,255,255,.05); }
+.stat-tile b { font-size: 1.5rem; }
+.stat-tile span { color: var(--ds-text-muted); font-size: var(--ds-text-xs, .75rem); }
+.chart { width: 100%; height: 8rem; display: block; }
+.chart rect { fill: var(--ds-accent, #7c9cff); opacity: .85; }
+.chart-axis { display: flex; justify-content: space-between; color: var(--ds-text-muted); font-size: var(--ds-text-xs, .75rem); }
