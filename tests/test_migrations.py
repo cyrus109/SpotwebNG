@@ -1,0 +1,121 @@
+"""Schema upgrades: fresh install, existing install, old schema, safety backup."""
+
+import sqlite3
+import tomllib
+from pathlib import Path
+
+import pytest
+from alembic.autogenerate import compare_metadata
+from alembic.migration import MigrationContext
+from sqlalchemy import inspect, text
+from sqlalchemy.ext.asyncio import create_async_engine
+
+from app import migrate
+from app.models import Base
+from app.version import VERSION
+
+
+@pytest.fixture
+def data_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(migrate, "SPOT_DATA_DIR", tmp_path / "data")
+    return tmp_path / "data"
+
+
+def _engine(tmp_path):
+    return create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/t.db")
+
+
+async def _schema_diff(engine):
+    def run(conn):
+        ctx = MigrationContext.configure(conn, opts={"compare_type": True})
+        return compare_metadata(ctx, Base.metadata)
+
+    async with engine.connect() as conn:
+        return await conn.run_sync(run)
+
+
+async def test_a_fresh_database_gets_exactly_the_models_schema(tmp_path, data_dir):
+    engine = _engine(tmp_path)
+    try:
+        result = await migrate.upgrade_database(engine)
+        assert result["from"] is None and result["to"] == migrate.head_revision()
+        assert await _schema_diff(engine) == []  # migrations and models cannot drift apart
+        assert result["backup"] is None  # nothing to protect yet
+        again = await migrate.upgrade_database(engine)
+        assert again["from"] == again["to"]  # second start is a no-op
+    finally:
+        await engine.dispose()
+
+
+async def test_an_install_from_before_migrations_keeps_its_data_and_is_backed_up(
+    tmp_path, data_dir
+):
+    engine = _engine(tmp_path)
+    try:
+        async with engine.begin() as conn:  # what every pre-0.3 boot did
+            await conn.run_sync(Base.metadata.create_all)
+            await conn.execute(
+                text(
+                    "INSERT INTO spots (message_id, title, poster, category, size, posted_at,"
+                    " subcat_a, subcat_b, subcat_c, subcat_d, subcat_z, spot_category, imdb_id,"
+                    " tvmaze_id, poster_url, description, nzb_ref, enriched, website, nzb_segments)"
+                    " VALUES ('<a@x>', 'Kept', '', 0, 0, '2026-01-01', '', '', '', '', '', -1, '',"
+                    " '', '', '', '', 1, '', '')"
+                )
+            )
+        result = await migrate.upgrade_database(engine)
+        assert result["from"] is None
+        backup = Path(result["backup"])
+        assert backup.parent == data_dir / "backups" and backup.exists()
+        con = sqlite3.connect(backup)  # the safety copy holds the pre-upgrade data
+        assert con.execute("SELECT title FROM spots").fetchone() == ("Kept",)
+        con.close()
+        async with engine.connect() as conn:
+            assert (await conn.execute(text("SELECT title FROM spots"))).scalar_one() == "Kept"
+        assert await _schema_diff(engine) == []
+        assert len(list((data_dir / "backups").glob("pre-migrate-*"))) == 1
+        await migrate.upgrade_database(engine)  # already current: no second backup
+        assert len(list((data_dir / "backups").glob("pre-migrate-*"))) == 1
+    finally:
+        await engine.dispose()
+
+
+async def test_missing_columns_on_an_old_schema_are_added_without_losing_rows(tmp_path, data_dir):
+    engine = _engine(tmp_path)
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("CREATE TABLE settings (key VARCHAR(128) PRIMARY KEY, value TEXT NOT NULL)")
+            )
+            await conn.execute(text("INSERT INTO settings VALUES ('theme', 'midnight')"))
+            await conn.execute(
+                text("CREATE TABLE spots (id INTEGER PRIMARY KEY, message_id VARCHAR(255))")
+            )
+        await migrate.upgrade_database(engine)
+        async with engine.connect() as conn:
+            cols = {
+                c["name"] for c in await conn.run_sync(lambda c: inspect(c).get_columns("spots"))
+            }
+            assert {"title", "posted_at", "website", "nzb_segments"} <= cols
+            assert (
+                await conn.execute(text("SELECT value FROM settings"))
+            ).scalar_one() == "midnight"
+    finally:
+        await engine.dispose()
+
+
+def test_the_version_constant_matches_pyproject():
+    pyproject = tomllib.loads((Path(__file__).parent.parent / "pyproject.toml").read_text())
+    assert pyproject["project"]["version"] == VERSION
+
+
+async def test_healthz_reports_version_and_schema():
+    import httpx
+
+    from app.main import app
+
+    migrate.SCHEMA_REVISION = "0002"
+    transport = httpx.ASGITransport(app=app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        body = (await c.get("/healthz")).json()
+    assert body["version"] == VERSION and body["schema"] == "0002"

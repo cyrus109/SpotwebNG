@@ -45,6 +45,7 @@ from .auth import (
     user_for_session,
     verify_credentials,
 )
+from .autobackup import summary as backup_summary
 from .backup import export_chunks, import_file
 from .categories import CATEGORY_NAMES
 from .comments import comment_counts, fetch_comment_bodies
@@ -61,6 +62,7 @@ from .filters import (
     tree_targets_adult,
     visible_sections,
 )
+from .jobs import job_status
 from .maintenance import ACTIONS, DESTRUCTIVE, run_maintenance
 from .models import ApiUser, Comment, Setting, Spot, User
 from .nntp_check import check_nntp
@@ -69,6 +71,7 @@ from .retention import retention_cutoff
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
 from .settings_store import backfill_plan, load_settings, save_settings
 from .spots import get_spot, is_adult_spot, search_spots
+from .version import VERSION
 
 router = APIRouter(dependencies=[Depends(verify_csrf)])
 templates = Jinja2Templates(
@@ -385,6 +388,9 @@ async def retrieve_status(session: AsyncSession = Depends(get_session)) -> JSONR
             "history_percent": history_percent(status),
             "effective_oldest": oldest,
             "retrieve_days": prefs["retrieve_days"],
+            "jobs": await job_status(session),
+            "backups": backup_summary(),
+            "version": VERSION,
         }
     )
 

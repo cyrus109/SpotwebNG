@@ -27,7 +27,11 @@ SPEC: dict[str, tuple[Any, str]] = {
     "comment_group": ("free.usenet", "str"),  # newsgroup Spotnet comments are posted to
     "retrieve_all": (False, "bool"),  # walk back to the server's oldest article
     "retrieve_days": (0, "int"),  # ...or only this many days back (0 = no limit)
-    "auto_enrich": (True, "bool"),  # fetch images/NZB refs in the background
+    "auto_enrich": (True, "bool"),
+    "backup_keep": (
+        3,
+        "int",
+    ),  # automatic daily backups to keep (0 = off)  # fetch images/NZB refs in the background
     # retention
     "retention_days": (0, "int"),  # 0 = keep forever
     "retention_type": ("fullonly", "str"),  # fullonly | everything
@@ -57,6 +61,7 @@ CLAMPS = {
     "retrieve_backfill": (1, 100_000_000),
     "retention_days": (0, 3650),
     "retrieve_days": (0, 36500),
+    "backup_keep": (0, 60),
     "sab_priority": (-100, 2),
 }
 

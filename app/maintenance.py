@@ -11,13 +11,16 @@ import asyncio
 from pathlib import Path
 
 from sqlalchemy import delete, select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from .autobackup import make_backup
 from .config import IMAGES_DIR, NZB_DIR
+from .jobs import reset_jobs, run_jobs
 from .models import Comment, Download, Setting, Spot, UsenetState
 from .progress import KEY as STATUS_KEY
 from .retention import prune_old_spots
 
+_tasks: set[asyncio.Task] = set()  # keep references to fire-and-forget runs
 ACTIONS = (
     "prune",
     "orphans",
@@ -25,6 +28,8 @@ ACTIONS = (
     "reset-bookmarks",
     "wipe-comments",
     "forget-downloads",
+    "backup-now",
+    "rebuild-derived",
     "wipe",
 )
 DESTRUCTIVE = ("wipe-comments", "forget-downloads", "wipe")
@@ -85,6 +90,18 @@ async def run_maintenance(session: AsyncSession, action: str) -> str:
         await session.execute(delete(UsenetState).where(UsenetState.infotype == "comments"))
         await session.commit()
         return f"Deleted {res.rowcount or 0:,} comments"
+
+    if action == "backup-now":
+        factory = async_sessionmaker(session.bind, expire_on_commit=False)
+        made = await make_backup(factory)
+        return f"Backup written: {made.name} ({made.stat().st_size / 1e6:.1f} MB)"
+
+    if action == "rebuild-derived":
+        factory = async_sessionmaker(session.bind, expire_on_commit=False)
+        forgot = await reset_jobs(session)
+        _tasks.add(task := asyncio.create_task(run_jobs(factory)))
+        task.add_done_callback(_tasks.discard)
+        return f"Rebuilding derived data in the background ({forgot} jobs reset)"
 
     if action == "forget-downloads":
         res = await session.execute(delete(Download))

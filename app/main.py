@@ -26,15 +26,18 @@ from .auth import (
     migrate_legacy_account,
     sweep_expired_sessions,
 )
+from .autobackup import backup_loop
 from .comments import retrieve_comments
 from .config import BASE_DIR, IMAGES_DIR, get_settings
 from .csrf import PRE_SESSION_COOKIE
 from .db import SessionLocal, get_session, init_db
+from .jobs import run_jobs
 from .newznab import router as newznab_router
 from .retention import prune_old_spots, retention_cutoff
 from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
 from .seed import seed_if_empty
 from .settings_store import backfill_plan, load_settings
+from .version import VERSION
 from .web import router as web_router
 
 logging.basicConfig(
@@ -124,6 +127,8 @@ async def lifespan(app: FastAPI):
     background = [
         asyncio.create_task(_retrieve_loop()),
         asyncio.create_task(_enrich_loop()),
+        asyncio.create_task(run_jobs(SessionLocal)),
+        asyncio.create_task(backup_loop(SessionLocal)),
     ]
     yield
     for task in background:
@@ -204,4 +209,13 @@ async def healthz() -> JSONResponse:
     except Exception:
         logger.exception("health check failed")
         return JSONResponse({"status": "error", "database": "unreachable"}, status_code=503)
-    return JSONResponse({"status": "ok", "database": "ok"})
+    from . import migrate
+
+    return JSONResponse(
+        {
+            "status": "ok",
+            "database": "ok",
+            "version": VERSION,
+            "schema": migrate.SCHEMA_REVISION,
+        }
+    )

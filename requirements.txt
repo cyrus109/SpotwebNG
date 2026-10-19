@@ -1,6 +1,7 @@
 # Pinned to the versions this release was tested against.
 # Regenerate with: pip freeze | grep -E '<these names>'
 aiosqlite==0.22.1
+alembic==1.20.0
 asyncpg==0.31.0
 fastapi==0.141.1
 httpx==0.28.1

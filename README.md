@@ -53,7 +53,10 @@ cd SpotwebNG
 docker compose up -d --build
 ```
 
-To update later: `git pull && docker compose up -d --build`. Your data stays in the volume.
+To update later: `docker compose pull && docker compose up -d` (CI publishes the image; or
+`git pull && docker compose up -d --build` to build locally). Your data stays in the volume
+and upgrades never re-read Usenet — see [docs/DEPLOY.md](docs/DEPLOY.md) for how schema
+upgrades, safety backups and rollbacks work.
 
 Open <http://localhost:7979>. The setup wizard asks for an administrator login first —
 **complete it, because until you do the instance is open to anyone who can reach it** —

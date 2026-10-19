@@ -3,9 +3,10 @@
 services:
   spotwebng:
     build: .
-    image: ghcr.io/formaxlabs/spotwebng:latest
+    image: ghcr.io/cyrus109/spotwebng:latest
     container_name: spotwebng
     restart: unless-stopped
+    stop_grace_period: 30s  # let a running retrieval commit its chunk
     ports:
       - "7979:7979"
     volumes:

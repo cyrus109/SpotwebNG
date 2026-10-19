@@ -126,6 +126,15 @@
           <input type="text" name="comment_group" id="comment_group" maxlength="128" pattern="[A-Za-z0-9._+\-]+" value="{{ values.comment_group }}">
         </div>
       </div>
+      <div class="set-row">
+        <div class="set-info">
+          <label class="set-name" for="backup_keep">Automatic backups</label>
+          <span class="set-desc">Keep this many daily backups in the data folder (0 turns them off). Each is a full export.</span>
+        </div>
+        <div class="set-control input-unit">
+          <input type="number" min="0" max="60" step="1" name="backup_keep" id="backup_keep" value="{{ values.backup_keep }}"><span class="unit">backups</span>
+        </div>
+      </div>
       <label class="set-row set-row-toggle">
         <div class="set-info">
           <span class="set-name">Background enrichment</span>
@@ -336,6 +345,8 @@
         <option value="vacuum">Compact the database</option>
         <option value="reset-bookmarks">Reset retrieval position (keep spots)</option>
         <option value="wipe-comments">Delete all comments</option>
+        <option value="backup-now">Back up now (to the server's backups folder)</option>
+        <option value="rebuild-derived">Rebuild derived data (search index, flags)</option>
         <option value="forget-downloads">Forget which spots were downloaded</option>
         <option value="wipe">Delete ALL spots &amp; comments (download history is kept)</option>
       </select>

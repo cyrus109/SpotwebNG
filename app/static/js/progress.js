@@ -45,6 +45,10 @@
       parts.push("a full history stops at " + day(d.effective_oldest) + " (" + d.retrieve_days + " days)");
     if (st.floor_date) parts.push("reached " + day(st.floor_date));
     if (!st.oldest_date) parts.push("The provider's oldest date is shown after the first retrieval.");
+    const running = (d.jobs || []).filter((j) => j.status !== "done");
+    if (running.length) parts.push("background jobs: " + running.map((j) => j.description + " (" + j.status + (j.processed ? ", " + j.processed.toLocaleString() : "") + ")").join(", "));
+    if (d.backups && d.backups.count) parts.push(d.backups.count + " backup(s), latest " + day(d.backups.latest));
+    if (d.version) parts.push("v" + d.version);
     const imp = st.last_import;
     if (imp) {
       const n = imp.added ? Object.values(imp.added).reduce((a, b) => a + b, 0) : 0;

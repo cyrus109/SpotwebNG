@@ -12,7 +12,6 @@ from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .config import get_settings
-from .models import Base
 
 _settings = get_settings()
 engine = create_async_engine(_settings.database_url, echo=False, future=True)
@@ -20,9 +19,11 @@ SessionLocal = async_sessionmaker(engine, expire_on_commit=False, class_=AsyncSe
 
 
 async def init_db() -> None:
-    """Create tables on boot. In production use Alembic migrations instead."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+    """Bring the schema up to date (Alembic; see migrate.py). Never recreates an
+    existing database."""
+    from .migrate import upgrade_database
+
+    await upgrade_database(engine)
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:

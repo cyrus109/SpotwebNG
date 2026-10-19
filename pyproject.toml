@@ -1,6 +1,6 @@
 [project]
 name = "spotwebng"
-version = "0.2.0"
+version = "0.3.0"
 description = "A modern Spotweb — Spotnet/Usenet indexer with a Newznab API"
 requires-python = ">=3.11"
 dynamic = ["dependencies"]

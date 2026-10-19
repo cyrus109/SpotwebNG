@@ -83,6 +83,21 @@ class Download(Base):
     source: Mapped[str] = mapped_column(String(16), default="api")
 
 
+class JobState(Base):
+    """Progress of a derived-data background job (app/jobs.py)."""
+
+    __tablename__ = "job_state"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    version: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(
+        String(16), default="pending"
+    )  # pending|running|done|failed
+    processed: Mapped[int] = mapped_column(Integer, default=0)
+    detail: Mapped[str] = mapped_column(String(255), default="")
+    updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class ApiUser(Base):
     """A consumer of the Newznab API (e.g. a Radarr/Sonarr instance)."""
 
