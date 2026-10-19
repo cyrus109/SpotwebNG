@@ -1,3 +1,32 @@
+// CSRF: every unsafe fetch() carries the session's token as a header, and every
+// POST form gets it as a hidden field just before it is submitted.
+(function () {
+  const meta = document.querySelector('meta[name="csrf-token"]');
+  const token = meta ? meta.content : "";
+  if (!token) return;
+  const nativeFetch = window.fetch.bind(window);
+  window.fetch = function (input, init) {
+    init = init || {};
+    const method = (init.method || (input && input.method) || "GET").toUpperCase();
+    if (method !== "GET" && method !== "HEAD") {
+      const headers = new Headers(init.headers || (input && input.headers) || {});
+      headers.set("X-CSRF-Token", token);
+      init = Object.assign({}, init, { headers });
+    }
+    return nativeFetch(input, init);
+  };
+  const addField = (form) => {
+    if ((form.method || "").toLowerCase() !== "post" || form.querySelector('input[name="csrf_token"]')) return;
+    const field = document.createElement("input");
+    field.type = "hidden";
+    field.name = "csrf_token";
+    field.value = token;
+    form.appendChild(field);
+  };
+  document.addEventListener("submit", (e) => addField(e.target), true);
+  document.querySelectorAll("form").forEach(addField);
+})();
+
 // Replace native <select> popups with styled menus. The OS draws the native
 // list itself (white on Windows regardless of colour-scheme), so the only way
 // to theme it is to render our own. The <select> stays as the source of truth.

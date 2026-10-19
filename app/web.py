@@ -49,6 +49,7 @@ from .backup import export_chunks, import_file
 from .categories import CATEGORY_NAMES
 from .comments import comment_counts, fetch_comment_bodies
 from .config import BASE_DIR, IMAGES_DIR, get_settings, load_providers
+from .csrf import csrf_context, verify_csrf
 from .db import SessionLocal, get_session
 from .downloader import check_sabnzbd, send_spot
 from .facets import option_counts, section_counts, section_dimensions
@@ -68,8 +69,10 @@ from .retriever import RETRIEVE_LOCK, enrich_new_spots, retrieve_spots
 from .settings_store import backfill_plan, load_settings, save_settings
 from .spots import get_spot, is_adult_spot, search_spots
 
-router = APIRouter()
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+router = APIRouter(dependencies=[Depends(verify_csrf)])
+templates = Jinja2Templates(
+    directory=str(BASE_DIR / "templates"), context_processors=[csrf_context]
+)
 
 
 def _gb(size: int) -> str:

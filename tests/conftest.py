@@ -62,3 +62,27 @@ def no_slow_dns(monkeypatch):
         return await real_open(host, port, *args, **kwargs)
 
     monkeypatch.setattr(asyncio, "open_connection", guarded)
+
+
+@pytest.fixture(autouse=True)
+def csrf_token_for_test_clients(request, monkeypatch):
+    """Logged-in test clients behave like the browser: send the CSRF header. Mark a
+    test `raw_csrf` to send requests exactly as built."""
+    if request.node.get_closest_marker("raw_csrf"):
+        return
+    import re
+
+    import httpx
+
+    from app.csrf import token_for
+
+    real = httpx.AsyncClient.build_request
+
+    def build(self, *args, **kwargs):
+        built = real(self, *args, **kwargs)
+        found = re.search(r"sw_session=([^;]+)", built.headers.get("cookie", ""))
+        if found and "x-csrf-token" not in built.headers:
+            built.headers["X-CSRF-Token"] = token_for(found.group(1))
+        return built
+
+    monkeypatch.setattr(httpx.AsyncClient, "build_request", build)
