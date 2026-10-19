@@ -82,7 +82,7 @@ CLAMPS = {
     "per_page": (12, 500),
     "retrieve_interval": (5, 1440),
     "retrieve_backfill": (1, 100_000_000),
-    "retention_days": (0, 3650),
+    "retention_days": (0, 36500),
     "retrieve_days": (0, 36500),
     "backup_keep": (0, 60),
     "notify_failure_after": (0, 50),

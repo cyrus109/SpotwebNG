@@ -165,3 +165,11 @@ def test_retrieve_all_defaults_off_and_coerces():
     assert DEFAULTS["retrieve_all"] is False
     assert _coerce("retrieve_all", "on") is True
     assert _coerce("retrieve_all", "garbage") is False
+
+
+def test_retention_accepts_a_news_servers_full_retention_period():
+    from app.settings_store import _coerce
+
+    assert _coerce("retention_days", "5910") == 5910  # a provider advertising ~16 years
+    assert _coerce("retention_days", "999999") == 36500  # still bounded
+    assert _coerce("retention_days", "-5") == 0
