@@ -131,3 +131,26 @@ async def test_refresh_keeps_the_old_value_when_one_key_fails(env, monkeypatch):
     monkeypatch.setitem(facets._RAW, "sections", (boom, default))
     await facets.refresh_facets()
     assert await _count(env) == 3  # old number kept, refresh did not abort
+
+
+async def test_pending_builds_and_sticky_entries_are_capped(env, monkeypatch):
+    monkeypatch.setattr(facets, "WAIT", 0.01)
+    monkeypatch.setattr(facets, "MAX_PENDING", 2)
+    gate = asyncio.Event()
+    fn, default = facets._RAW["options"]
+
+    async def slow(session, tree):
+        await gate.wait()
+        return []
+
+    monkeypatch.setitem(facets._RAW, "options", (slow, default))
+    for n in range(6):
+        async with env() as s:
+            await facets.option_counts(s, f"cat0_z{n}")
+    assert len(facets._pending) == 2
+    gate.set()
+    await asyncio.sleep(0.1)
+    monkeypatch.setattr(cache, "MAX_STICKY", 3)
+    for n in range(10):
+        cache.store(f"facet:t{n}", n)
+    assert len([k for k in cache._store if k.startswith("facet:")]) <= 3

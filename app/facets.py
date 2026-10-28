@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 WAIT = 3.0  # seconds a page waits for a missing facet before rendering without it
 REFRESH_DELAY = 30.0  # let a retrieval's checkpoint finish and coalesce bursts of changes
 MAX_KNOWN = 100
+MAX_PENDING = 4  # concurrent background builds; more would stack up full-table scans
 SNAPSHOT_NAME = "facets.json"
 
 _RAW: dict[str, tuple] = {}  # name -> (function, default)
@@ -107,6 +108,8 @@ def _cached_facet(name: str, default):
                 return hit
             task = _pending.get(key)
             if task is None:
+                if len(_pending) >= MAX_PENDING:
+                    return default  # busy counting; this view renders without the numbers
                 task = _pending[key] = asyncio.create_task(_fill(key, name, args, kwargs))
             done, _ = await asyncio.wait({task}, timeout=WAIT)
             value = task.result() if task in done else None

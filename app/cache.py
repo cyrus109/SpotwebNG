@@ -15,6 +15,7 @@ from typing import Any
 STICKY = "facet:"  # sidebar/drawer counts: survive invalidate(), swapped by facets.refresh_facets()
 MISSING = object()
 MAX_ENTRIES = 1000
+MAX_STICKY = 200  # request-chosen drawer trees must not grow the no-expiry set without bound
 MAX_KEY_LENGTH = 512
 
 _store: dict[str, tuple[float, Any]] = {}  # insertion-ordered: the first key is the oldest
@@ -48,7 +49,13 @@ def peek(key: str) -> Any:
 
 
 def store(key: str, value: Any) -> None:
+    if len(key) > MAX_KEY_LENGTH:
+        return
     _store.pop(key, None)
+    sticky = [k for k in _store if k.startswith(STICKY)]
+    if key.startswith(STICKY) and len(sticky) >= MAX_STICKY:
+        for oldest in sticky[: len(sticky) - MAX_STICKY + 1]:
+            del _store[oldest]
     _store[key] = (float("inf"), value)
 
 
