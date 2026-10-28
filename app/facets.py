@@ -83,7 +83,7 @@ async def _fill(key: str, name: str, args: tuple, kwargs: dict):
         _pending.pop(key, None)
 
 
-def _cached_facet(name: str, default):
+def _cached_facet(name: str, default, valid=None):
     """Serve a facet from memory. A missing one is built in the background (a page waits
     at most WAIT seconds for it); it is only rebuilt by refresh_facets()."""
 
@@ -93,6 +93,8 @@ def _cached_facet(name: str, default):
         async def wrapper(session, *args, **kwargs):
             if not cache.enabled:
                 return await fn(session, *args, **kwargs)
+            if valid is not None and not valid(*args, **kwargs):
+                return default  # not a tree we could ever count: no build, nothing cached
             key = _key(name, args, kwargs)
             if key not in _known:
                 _known[key] = (name, args, kwargs)
@@ -108,7 +110,8 @@ def _cached_facet(name: str, default):
                 return hit
             task = _pending.get(key)
             if task is None:
-                if len(_pending) >= MAX_PENDING:
+                busy = sum(k.startswith(f"{cache.STICKY}options:") for k in _pending)
+                if name == "options" and busy >= MAX_PENDING:
                     return default  # busy counting; this view renders without the numbers
                 task = _pending[key] = asyncio.create_task(_fill(key, name, args, kwargs))
             done, _ = await asyncio.wait({task}, timeout=WAIT)
@@ -244,6 +247,10 @@ async def _count(session: AsyncSession, conds: list) -> int:
     return (await session.execute(stmt)).scalar_one()
 
 
+def _valid_tree(tree: str) -> bool:
+    return isinstance(tree, str) and len(tree) <= 200 and bool(parse_tree(tree)[0])
+
+
 @_cached_facet("sections", {})
 async def section_counts(session: AsyncSession) -> dict[str, int]:
     """Spot count per sidebar section (All, Movies, Series, ...)."""
@@ -254,7 +261,7 @@ async def section_counts(session: AsyncSession) -> dict[str, int]:
     return counts
 
 
-@_cached_facet("options", [])
+@_cached_facet("options", [], valid=_valid_tree)
 async def option_counts(session: AsyncSession, tree: str) -> list[dict]:
     """Per-dimension options for the drawer, each with a count and state.
 

@@ -13,6 +13,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 STICKY = "facet:"  # sidebar/drawer counts: survive invalidate(), swapped by facets.refresh_facets()
+PROTECTED = (STICKY + "sections:", STICKY + "dims:")
 MISSING = object()
 MAX_ENTRIES = 1000
 MAX_STICKY = 200  # request-chosen drawer trees must not grow the no-expiry set without bound
@@ -54,7 +55,9 @@ def store(key: str, value: Any) -> None:
     _store.pop(key, None)
     sticky = [k for k in _store if k.startswith(STICKY)]
     if key.startswith(STICKY) and len(sticky) >= MAX_STICKY:
-        for oldest in sticky[: len(sticky) - MAX_STICKY + 1]:
+        # the sidebar/standard counts are never the ones to go; only request-chosen trees
+        spare = [k for k in sticky if not k.startswith(PROTECTED)]
+        for oldest in spare[: len(sticky) - MAX_STICKY + 1]:
             del _store[oldest]
     _store[key] = (float("inf"), value)
 

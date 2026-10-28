@@ -146,7 +146,7 @@ async def test_pending_builds_and_sticky_entries_are_capped(env, monkeypatch):
     monkeypatch.setitem(facets._RAW, "options", (slow, default))
     for n in range(6):
         async with env() as s:
-            await facets.option_counts(s, f"cat0_z{n}")
+            await facets.option_counts(s, f"cat{n}_z0")
     assert len(facets._pending) == 2
     gate.set()
     await asyncio.sleep(0.1)
@@ -154,3 +154,20 @@ async def test_pending_builds_and_sticky_entries_are_capped(env, monkeypatch):
     for n in range(10):
         cache.store(f"facet:t{n}", n)
     assert len([k for k in cache._store if k.startswith("facet:")]) <= 3
+
+
+async def test_bad_or_huge_trees_are_rejected_without_a_build(env):
+    async with env() as s:
+        assert await facets.option_counts(s, "x" * 5000) == []
+        assert await facets.option_counts(s, "nonsense") == []
+    assert not facets._pending and not facets._known
+
+
+def test_standard_facets_survive_sticky_eviction(monkeypatch):
+    monkeypatch.setattr(cache, "MAX_STICKY", 3)
+    cache.invalidate("facet:")
+    cache.store("facet:sections:a", 1)
+    for n in range(6):
+        cache.store(f"facet:options:{n}", n)
+    assert cache.peek("facet:sections:a") == 1
+    cache.invalidate("facet:")
