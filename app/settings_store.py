@@ -29,7 +29,9 @@ SPEC: dict[str, tuple[Any, str]] = {
     "retrieve_all": (False, "bool"),  # walk back to the server's oldest article
     "retrieve_days": (0, "int"),  # ...or only this many days back (0 = no limit)
     "auto_enrich": (True, "bool"),
-    "enrich_older_than_days": (0, "int"),  # 0 = enrich everything; else only spots this young
+    # Enriching a multi-million-spot history means millions of requests and tens of GB of covers;
+    # older spots are enriched when opened. 0 = enrich everything.
+    "enrich_older_than_days": (90, "int"),
     "backup_keep": (
         3,
         "int",

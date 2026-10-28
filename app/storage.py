@@ -10,10 +10,11 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from . import autobackup, config
 from .backup import estimate_export_bytes
+from .db import wal_bytes
 
 
 def _dir_bytes(path: Path) -> int:
@@ -47,7 +48,14 @@ async def collect(session: AsyncSession) -> dict[str, Any]:
     probe = data_dir if data_dir.exists() else data_dir.parent
     usage = shutil.disk_usage(probe)
     backups = autobackup.summary()
+    safety = (
+        list(autobackup.backup_dir().glob("pre-migrate-*.db"))
+        if autobackup.backup_dir().is_dir()
+        else []
+    )
     return {
+        "premigrate": {"count": len(safety), "bytes": sum(f.stat().st_size for f in safety)},
+        "wal_bytes": wal_bytes(session.bind) if isinstance(session.bind, AsyncEngine) else 0,
         "database_bytes": _db_bytes(session.bind.url) if hasattr(session.bind, "url") else None,
         "covers_bytes": await asyncio.to_thread(_dir_bytes, config.IMAGES_DIR),
         "nzb_bytes": await asyncio.to_thread(_dir_bytes, config.NZB_DIR),

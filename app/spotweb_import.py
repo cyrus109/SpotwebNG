@@ -253,7 +253,14 @@ def main(argv: list[str] | None = None) -> int:
         await init_db()
         return await run_import(engine, SessionLocal, args.batch, not args.skip_comments)
 
-    result = asyncio.run(go())
+    async def go_and_checkpoint() -> dict:
+        from .db import checkpoint_after_bulk_work
+
+        outcome = await go()
+        await checkpoint_after_bulk_work()  # leave the write-ahead log empty after a big import
+        return outcome
+
+    result = asyncio.run(go_and_checkpoint())
     print(f"Done. Added: {result['added']}; skipped: {result['skipped']}")
     return 0
 

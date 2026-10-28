@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from . import config
 from .backup import export_chunks
+from .db import checkpoint_after_bulk_work
 from .settings_store import load_settings
 
 logger = logging.getLogger("spotwebng")
@@ -58,6 +59,7 @@ async def make_backup(
         os.replace(partial, final)
     finally:
         partial.unlink(missing_ok=True)
+    await checkpoint_after_bulk_work(factory.kw.get("bind"))
     return final
 
 

@@ -10,6 +10,7 @@ docs/PLAN-v0.3.md for the contract.
 from __future__ import annotations
 
 import logging
+import shutil
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
@@ -26,7 +27,7 @@ from .config import BASE_DIR, SPOT_DATA_DIR
 logger = logging.getLogger("spotwebng")
 
 SCRIPT_LOCATION = str(BASE_DIR / "migrations")
-KEEP_PRE_MIGRATION_BACKUPS = 5
+KEEP_PRE_MIGRATION_BACKUPS = 2  # each is a full copy of the database
 # Filled in by upgrade_database(); shown by /healthz.
 SCHEMA_REVISION: str | None = None
 
@@ -51,6 +52,12 @@ def backup_sqlite(db_path: str, from_rev: str | None, to_rev: str) -> Path | Non
         return None
     target_dir = SPOT_DATA_DIR / "backups"
     target_dir.mkdir(parents=True, exist_ok=True)
+    needed = int(source.stat().st_size * 1.2)  # the copy is about as big as the database
+    if shutil.disk_usage(target_dir).free < needed:
+        logger.warning(
+            "not enough free disk space for a pre-migration copy; continuing without one"
+        )
+        return None
     stamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
     target = target_dir / f"pre-migrate-{from_rev or 'none'}-to-{to_rev}-{stamp}.db"
     src, dst = sqlite3.connect(source), sqlite3.connect(target)

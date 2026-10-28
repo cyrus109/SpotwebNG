@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from .autobackup import make_backup
 from .cache import invalidate
 from .config import IMAGES_DIR, NZB_DIR
+from .db import checkpoint_after_bulk_work
 from .jobs import reset_jobs, run_jobs
 from .models import Comment, Download, Setting, Spot, UsenetState
 from .progress import KEY as STATUS_KEY
@@ -67,6 +68,9 @@ async def run_maintenance(session: AsyncSession, action: str) -> str:
         return await _run(session, action)
     finally:
         invalidate()  # any action may change what counts and facets show
+        await checkpoint_after_bulk_work(
+            session.bind if isinstance(session.bind, AsyncEngine) else None
+        )
 
 
 async def _run(session: AsyncSession, action: str) -> str:

@@ -35,6 +35,27 @@ first.)
 3. **Automatic backups** (*Settings → Automatic backups*, default 3 daily) write a full export
    to `/data/backups`.
 
+## Big databases on a slow disk
+
+SQLite is tuned for a multi-gigabyte index: a 16 MiB page cache per connection, memory-mapped reads,
+temp tables in RAM, and a 128 MiB cap on the write-ahead log (`journal_size_limit`). Background
+housekeeping checkpoints the log after imports, backups, jobs and every retrieval run, and a watchdog
+checks it every five minutes (passive above 256 MB, truncating above 1 GB). The *Storage* line in
+Status & backup shows the log size when it is over 50 MB.
+
+Upgrading from a release before the `(enriched, posted_at)` index (migration 0008) takes a few minutes
+on a large database the first time: the app copies the database aside (`pre-migrate-*`, the newest two
+are kept, and it is skipped if the disk is too full), builds the index, and only then starts serving.
+If the old write-ahead log is already huge, you can empty it once, offline, while the container is
+stopped:
+
+```bash
+docker compose stop spotwebng
+docker run --rm -v spotwebng-data:/data python:3.11-slim python -c \
+  "import sqlite3; c=sqlite3.connect('/data/spotwebng.db'); print(c.execute('PRAGMA wal_checkpoint(TRUNCATE)').fetchone())"
+docker compose start spotwebng
+```
+
 ## The secret key
 
 Stored credentials (Usenet password, SABnzbd / Radarr / Sonarr keys, notification tokens) are

@@ -35,7 +35,14 @@ from .autobackup import backup_loop
 from .comments import retrieve_comments
 from .config import BASE_DIR, IMAGES_DIR, get_settings
 from .csrf import PRE_SESSION_COOKIE
-from .db import SessionLocal, get_session, init_db
+from .db import (
+    WAL_SOFT_BYTES,
+    SessionLocal,
+    checkpoint_after_bulk_work,
+    get_session,
+    init_db,
+    tame_wal,
+)
 from .jobs import run_jobs
 from .newznab import router as newznab_router
 from .notify import FailureTracker
@@ -120,12 +127,19 @@ async def _retrieve_loop() -> None:
                 await FAILURES.failed(prefs, type(exc).__name__)
             except Exception:
                 logger.exception("failure alert could not be sent")
+        await checkpoint_after_bulk_work()
         await asyncio.sleep(interval)
+
+
+def backoff_delay(failures: int, base: float = ENRICH_INTERVAL, cap: float = 600.0) -> float:
+    """Seconds to wait after `failures` consecutive failures: base, 2x, 4x ... up to cap."""
+    return min(base * (2 ** max(failures, 0)), cap)
 
 
 async def _enrich_loop() -> None:
     """Continuously enrich pending spots (newest first) with full-XML data."""
     await asyncio.sleep(ENRICH_STARTUP_DELAY)
+    failures = 0
     while True:
         try:
             async with SessionLocal() as session:
@@ -140,6 +154,7 @@ async def _enrich_loop() -> None:
                     limit=ENRICH_BATCH,
                     newer_than=datetime.now(UTC) - timedelta(days=days) if days else None,
                 )
+            failures = 0
             if result["enriched"] or result["failed"]:
                 logger.info("spot enrichment: %s", result)
                 await asyncio.sleep(2)  # keep draining while there's a backlog
@@ -147,8 +162,23 @@ async def _enrich_loop() -> None:
         except ValueError:
             pass  # provider not configured yet
         except Exception:
-            logger.exception("spot enrichment failed")
+            failures += 1  # news server unreachable etc.: do not hammer it (or our own disk)
+            logger.exception("spot enrichment failed (%d in a row)", failures)
+            await asyncio.sleep(backoff_delay(failures))
+            continue
         await asyncio.sleep(ENRICH_INTERVAL)
+
+
+async def _wal_loop() -> None:
+    """Safety net: whatever grew the write-ahead log, keep the file from ballooning."""
+    await asyncio.sleep(60)
+    while True:
+        size = await tame_wal()
+        if size > WAL_SOFT_BYTES:
+            logger.warning(
+                "write-ahead log is still %.0f MB after a checkpoint attempt", size / 1e6
+            )
+        await asyncio.sleep(300)
 
 
 @asynccontextmanager
@@ -162,6 +192,7 @@ async def lifespan(app: FastAPI):
         asyncio.create_task(_retrieve_loop()),
         asyncio.create_task(_enrich_loop()),
         asyncio.create_task(run_jobs(SessionLocal)),
+        asyncio.create_task(_wal_loop()),
         asyncio.create_task(backup_loop(SessionLocal)),
     ]
     yield

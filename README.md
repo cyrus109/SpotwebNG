@@ -189,6 +189,11 @@ clients want the base URL, others the full `/api`.
   5,000 costs the same as page 1. The history walk and cover enrichment use several NNTP connections in
   parallel (the *connections* value from setup, at most 8), and *Enrich only recent spots* leaves old spots to
   be enriched when you open them.
+- **Large databases** — tuned for a multi-million-spot index on a modest (even spinning) disk: the
+  background enrichment query is served from a single composite index instead of sorting every
+  unenriched spot, enrichment commits once per batch, only spots from the last 90 days are enriched
+  in the background by default (older ones when you open them; change it in Settings), and SQLite's
+  write-ahead log is capped and checkpointed automatically. See [docs/DEPLOY.md](docs/DEPLOY.md).
 - **Upgrades without re-downloading** — the database schema is migrated automatically at start-up (with a
   safety copy first), and anything computable from stored data (adult flag, search index, duplicate keys,
   IMDb ids, signature checks) is filled in by background jobs shown in the Status card. See

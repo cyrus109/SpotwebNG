@@ -21,6 +21,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .cache import invalidate
+from .db import checkpoint_after_bulk_work
 from .models import JobState
 
 logger = logging.getLogger("spotwebng")
@@ -95,6 +96,7 @@ async def run_jobs(factory: async_sessionmaker[AsyncSession], pause: float = 0.0
     finally:
         _running = False
         invalidate()
+        await checkpoint_after_bulk_work(factory.kw.get("bind"))
 
 
 async def rerun(factory: async_sessionmaker[AsyncSession], name: str) -> None:

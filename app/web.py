@@ -53,7 +53,7 @@ from .categories import CATEGORY_NAMES
 from .comments import comment_counts, fetch_comment_bodies
 from .config import BASE_DIR, IMAGES_DIR, get_settings, load_providers
 from .csrf import csrf_context, verify_csrf
-from .db import SessionLocal, get_session
+from .db import SessionLocal, checkpoint_after_bulk_work, get_session
 from .downloader import check_sabnzbd, send_spot
 from .downloads import downloaded_map
 from .duplicates import best as dup_best
@@ -791,6 +791,7 @@ async def _import_run(factory, path: str) -> None:
             os.unlink(path)
         except OSError:
             pass
+        await checkpoint_after_bulk_work(factory.kw.get("bind"))
 
 
 @router.post("/settings/import")

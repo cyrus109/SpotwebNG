@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, DateTime, Integer, String, Text, func
+from sqlalchemy import BigInteger, DateTime, Index, Integer, String, Text, func
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -21,6 +21,12 @@ class Spot(Base):
     """A single Spotnet spot — the unit Radarr/Sonarr search for."""
 
     __tablename__ = "spots"
+    __table_args__ = (
+        # The enrichment loop asks for "the newest unenriched spots": WHERE enriched = 0
+        # ORDER BY posted_at DESC LIMIT 50. With only an index on `enriched` SQLite fetched and
+        # sorted every unenriched row (over a million) on each run; this index answers it directly.
+        Index("ix_spots_enriched_posted_at", "enriched", "posted_at"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     message_id: Mapped[str] = mapped_column(String(255), unique=True, index=True)
@@ -47,7 +53,7 @@ class Spot(Base):
     # NZB reference: the message-id of the NZB segment to fetch from Usenet.
     nzb_ref: Mapped[str] = mapped_column(String(255), default="")
     # Full-spot (X-XML) enrichment: 0 = pending, 1 = done, 2 = failed.
-    enriched: Mapped[int] = mapped_column(Integer, default=0, index=True)
+    enriched: Mapped[int] = mapped_column(Integer, default=0)
     website: Mapped[str] = mapped_column(String(1024), default="")
     # JSON list of NZB segment message-ids from the full-spot XML.
     nzb_segments: Mapped[str] = mapped_column(Text, default="")

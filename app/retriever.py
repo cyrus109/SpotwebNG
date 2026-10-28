@@ -637,7 +637,6 @@ async def enrich_new_spots(
                 if full is None:
                     spot.enriched = 2
                     failed += 1
-                    await session.commit()
                     continue
 
                 if full["description"]:
@@ -657,9 +656,11 @@ async def enrich_new_spots(
 
                 spot.enriched = 1
                 enriched += 1
-                # Commit per spot: a later failure then costs one spot, not fifty,
-                # and never orphans an image that was already written to disk.
-                await session.commit()
+            # One commit per batch (at most a handful of spots): every commit rewrites the
+            # touched pages of ~12 indexes and the search index into the log, so committing
+            # per spot multiplied the write load. A crash loses at most this batch, which is
+            # simply enriched again; an image already written to disk is overwritten then.
+            await session.commit()
             if stop:
                 break
     finally:
