@@ -27,8 +27,8 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from .cache import invalidate
 from .comments import _MSGID_RE
+from .facets import mark_stale
 from .filters import clean_tree
 from .models import Comment, Download, Spot, Spotter, UsenetState, Watch
 from .spotnet import safe_website
@@ -307,7 +307,7 @@ async def import_file(
                 # Bookmarks last, and only where this install has none: they must
                 # match the data, and a local bookmark already does.
                 await _flush(session, "usenet_state", batch["usenet_state"], result)
-                invalidate()
+                mark_stale()
         except (OSError, EOFError, zlib.error) as exc:
             raise ValueError(f"Export file is damaged: {exc}") from exc
     return result

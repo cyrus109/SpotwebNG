@@ -10,7 +10,7 @@
            class="rail-link {{ 'on' if s.key == current_section }}">
           <span class="rail-icon">{{ icons[s.key] | safe }}</span>
           <span class="rail-text">{{ s.label }}</span>
-          <span class="rail-n">{{ '{:,}'.format(counts.get(s.key or 'all', 0)) }}</span>
+          <span class="rail-n">{{ '{:,}'.format(counts[s.key or 'all']) if counts else '…' }}</span>
         </a>
         {% endfor %}
       </div>

@@ -13,7 +13,6 @@ from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from . import signing
-from .cache import invalidate
 from .jobs import register
 from .models import Spot, Spotter
 
@@ -54,7 +53,9 @@ async def set_status(session: AsyncSession, spotter_id: str, status: str, note: 
     else:
         row.status, row.note = status, note[:255]
     await session.commit()
-    invalidate()
+    from .facets import mark_stale  # facets imports this module
+
+    mark_stale()
 
 
 async def status_of(session: AsyncSession, spotter_id: str) -> str:

@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from . import autobackup, config
+from . import autobackup, config, facets
 from .backup import estimate_export_bytes
 from .db import wal_bytes
 
@@ -54,6 +54,7 @@ async def collect(session: AsyncSession) -> dict[str, Any]:
         else []
     )
     return {
+        "counts_updated": facets.updated_at.isoformat() if facets.updated_at else None,
         "premigrate": {"count": len(safety), "bytes": sum(f.stat().st_size for f in safety)},
         "wal_bytes": wal_bytes(session.bind) if isinstance(session.bind, AsyncEngine) else 0,
         "database_bytes": _db_bytes(session.bind.url) if hasattr(session.bind, "url") else None,

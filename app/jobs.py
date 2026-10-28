@@ -20,7 +20,6 @@ from datetime import UTC, datetime
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from .cache import invalidate
 from .db import checkpoint_after_bulk_work
 from .models import JobState
 
@@ -59,12 +58,14 @@ async def run_jobs(factory: async_sessionmaker[AsyncSession], pause: float = 0.0
     if _running:
         return
     _running = True
+    ran = False
     try:
         for job in list(REGISTRY.values()):
             async with factory() as session:
                 state = await _state(session, job.name)
                 if state and state.status == "done" and state.version >= job.version:
                     continue
+                ran = True
                 if state is None or state.version != job.version:
                     state = JobState(name=job.name, version=job.version, processed=0)
                     await session.merge(state)
@@ -95,7 +96,10 @@ async def run_jobs(factory: async_sessionmaker[AsyncSession], pause: float = 0.0
                         await session.commit()
     finally:
         _running = False
-        invalidate()
+        if ran:
+            from .facets import mark_stale  # facets -> spotters -> jobs
+
+            mark_stale()  # derived flags can move spots between categories
         await checkpoint_after_bulk_work(factory.kw.get("bind"))
 
 

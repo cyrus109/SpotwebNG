@@ -69,6 +69,7 @@
       bits.push("covers " + mb(st2.covers_bytes), "NZB cache " + mb(st2.nzb_bytes));
       bits.push("backups " + st2.backups.count + " (" + mb(st2.backups.bytes) + ")");
       if (st2.premigrate && st2.premigrate.count) bits.push("upgrade safety copies " + st2.premigrate.count + " (" + mb(st2.premigrate.bytes) + ")");
+      bits.push("sidebar counts " + (st2.counts_updated ? "updated " + new Date(st2.counts_updated).toLocaleString() : "being counted…"));
       if (st2.wal_bytes > 5e7) bits.push("database log " + mb(st2.wal_bytes));
       bits.push("free on disk " + mb(st2.free_bytes) + " of " + mb(st2.total_bytes));
       bits.push("next export ≈ " + mb(st2.export_estimate_bytes));

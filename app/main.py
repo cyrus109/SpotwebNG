@@ -43,6 +43,7 @@ from .db import (
     init_db,
     tame_wal,
 )
+from .facets import load_snapshot, mark_stale, schedule_refresh
 from .jobs import run_jobs
 from .newznab import router as newznab_router
 from .notify import FailureTracker
@@ -116,6 +117,8 @@ async def _retrieve_loop() -> None:
                 pruned = await prune_old_spots(session)
                 if pruned["deleted"] or pruned["stripped"]:
                     logger.info("retention: %s", pruned)
+                if pruned["deleted"]:
+                    mark_stale()
         except ValueError:
             logger.info("spot retrieval skipped: provider not configured yet")
         except Exception as exc:
@@ -188,6 +191,8 @@ async def lifespan(app: FastAPI):
         await seed_if_empty(session)
         # Installs from before roles kept one login in `settings`.
         await migrate_legacy_account(session)
+    if not load_snapshot():  # first start after an upgrade: count once, in the background
+        schedule_refresh(delay=60)
     background = [
         asyncio.create_task(_retrieve_loop()),
         asyncio.create_task(_enrich_loop()),

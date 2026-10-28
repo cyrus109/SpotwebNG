@@ -56,6 +56,13 @@ docker run --rm -v spotwebng-data:/data python:3.11-slim python -c \
 docker compose start spotwebng
 ```
 
+Counting the sidebar and filter numbers scans every spot, which takes minutes on a cold slow disk, so
+a page view never does it. The counts are kept in memory and in `/data/facets.json`, recounted in the
+background about 30 s after a retrieval that added spots (or a prune, import or spotter block), and
+on demand through *Refresh the sidebar counts*. Until then the numbers stay as they were; the
+*Storage* line in Status & backup shows when they were last updated. After the first start on a new
+version they appear once the initial recount finishes (a few minutes on a big database).
+
 ## The secret key
 
 Stored credentials (Usenet password, SABnzbd / Radarr / Sonarr keys, notification tokens) are

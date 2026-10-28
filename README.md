@@ -193,7 +193,11 @@ clients want the base URL, others the full `/api`.
   background enrichment query is served from a single composite index instead of sorting every
   unenriched spot, enrichment commits once per batch, only spots from the last 90 days are enriched
   in the background by default (older ones when you open them; change it in Settings), and SQLite's
-  write-ahead log is capped and checkpointed automatically. See [docs/DEPLOY.md](docs/DEPLOY.md).
+  write-ahead log is capped and checkpointed automatically. The sidebar and filter counts are never
+  recounted when you open a page: they are kept from the last count, refreshed in the background only
+  after a retrieval that added spots (or a prune, import or spotter block) or on demand with *Refresh the
+  sidebar counts* under Maintenance, and saved so a restart shows them at once. See
+  [docs/DEPLOY.md](docs/DEPLOY.md).
 - **Upgrades without re-downloading** — the database schema is migrated automatically at start-up (with a
   safety copy first), and anything computable from stored data (adult flag, search index, duplicate keys,
   IMDb ids, signature checks) is filled in by background jobs shown in the Status card. See

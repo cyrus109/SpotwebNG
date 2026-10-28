@@ -12,6 +12,8 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any
 
+STICKY = "facet:"  # sidebar/drawer counts: survive invalidate(), swapped by facets.refresh_facets()
+MISSING = object()
 MAX_ENTRIES = 1000
 MAX_KEY_LENGTH = 512
 
@@ -19,7 +21,8 @@ _store: dict[str, tuple[float, Any]] = {}  # insertion-ordered: the first key is
 enabled = True  # tests switch it off so state changes are always visible
 
 
-async def cached(key: str, ttl: float, factory: Callable[[], Awaitable[Any]]) -> Any:
+async def cached(key: str, ttl: float | None, factory: Callable[[], Awaitable[Any]]) -> Any:
+    """Memoise `factory()`; ttl=None keeps the value until invalidate() or replace()."""
     if not enabled or len(key) > MAX_KEY_LENGTH:
         return await factory()
     now = time.monotonic()
@@ -30,13 +33,38 @@ async def cached(key: str, ttl: float, factory: Callable[[], Awaitable[Any]]) ->
     if len(_store) >= MAX_ENTRIES:
         for stale in [k for k, (expires, _v) in _store.items() if expires <= now]:
             del _store[stale]
-        while len(_store) >= MAX_ENTRIES:
-            del _store[next(iter(_store))]  # evict the oldest
+        for oldest in [k for k in _store if not k.startswith(STICKY)]:
+            if len(_store) < MAX_ENTRIES:
+                break
+            del _store[oldest]  # evict the oldest; the facet counts are never evicted
     _store.pop(key, None)  # re-insert at the end
-    _store[key] = (now + ttl, value)
+    _store[key] = (float("inf") if ttl is None else now + ttl, value)
     return value
 
 
-def invalidate(prefix: str = "") -> None:
+def peek(key: str) -> Any:
+    hit = _store.get(key)
+    return hit[1] if hit and hit[0] > time.monotonic() else MISSING
+
+
+def store(key: str, value: Any) -> None:
+    _store.pop(key, None)
+    _store[key] = (float("inf"), value)
+
+
+def replace(prefix: str, entries: dict[str, Any]) -> None:
+    """Swap every `prefix` entry for `entries` in one step, so readers never see a gap."""
     for key in [k for k in _store if k.startswith(prefix)]:
+        del _store[key]
+    for key, value in entries.items():
+        store(key, value)
+
+
+def invalidate(prefix: str = "", keep: tuple[str, ...] = ()) -> None:
+    """Drop cached values. The sticky facet counts are kept (only a refresh replaces them)
+    unless `prefix` asks for them explicitly, and anything starting with a `keep` prefix."""
+    keep_sticky = not prefix.startswith(STICKY)
+    for key in [k for k in _store if k.startswith(prefix)]:
+        if (keep_sticky and key.startswith(STICKY)) or key.startswith(keep):
+            continue
         del _store[key]

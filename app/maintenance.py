@@ -17,6 +17,7 @@ from .autobackup import make_backup
 from .cache import invalidate
 from .config import IMAGES_DIR, NZB_DIR
 from .db import checkpoint_after_bulk_work
+from .facets import mark_stale, schedule_refresh
 from .jobs import reset_jobs, run_jobs
 from .models import Comment, Download, Setting, Spot, UsenetState
 from .progress import KEY as STATUS_KEY
@@ -38,8 +39,10 @@ ACTIONS = (
     "forget-downloads",
     "backup-now",
     "rebuild-derived",
+    "refresh-counts",
     "wipe",
 )
+CHANGES_COUNTS = ("prune", "wipe", "refresh-counts")
 DESTRUCTIVE = ("wipe-comments", "forget-downloads", "wipe")
 
 
@@ -67,7 +70,10 @@ async def run_maintenance(session: AsyncSession, action: str) -> str:
     try:
         return await _run(session, action)
     finally:
-        invalidate()  # any action may change what counts and facets show
+        if action in CHANGES_COUNTS:
+            mark_stale()
+        else:
+            invalidate()
         await checkpoint_after_bulk_work(
             session.bind if isinstance(session.bind, AsyncEngine) else None
         )
@@ -121,6 +127,10 @@ async def _run(session: AsyncSession, action: str) -> str:
         _tasks.add(task := asyncio.create_task(run_jobs(factory)))
         task.add_done_callback(_tasks.discard)
         return f"Rebuilding derived data in the background ({forgot} jobs reset)"
+
+    if action == "refresh-counts":
+        schedule_refresh(delay=0)
+        return "Recounting in the background; the numbers update when it finishes"
 
     if action == "forget-downloads":
         res = await session.execute(delete(Download))

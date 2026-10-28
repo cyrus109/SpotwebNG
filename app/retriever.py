@@ -20,7 +20,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .cache import invalidate
+from .facets import mark_stale
 from .library import extract_ids
 from .models import Spot, UsenetState
 from .progress import history_percent, live_idle, live_set, load_status, save_status
@@ -493,7 +493,8 @@ async def retrieve_spots(
 
         await save_status(session, floor=floor.cur_article, last_run=datetime.now(UTC).isoformat())
         await session.commit()
-        invalidate()  # cached counts/facets would otherwise lag behind the new rows
+        if added or backfilled:
+            mark_stale()  # recount in the background; pages keep the old numbers until then
         return {
             "added": added,
             "backfilled": backfilled,

@@ -167,7 +167,7 @@ async def search_spots(
     async def count() -> int:
         return (await session.execute(count_stmt)).scalar_one()
 
-    total = await cached(count_key, 60, count)
+    total = await cached(count_key, None, count)  # until the next retrieval/refresh
     if after is not None and sort in ("new", "old"):
         # Keyset paging: continue strictly after the last row of the previous page. No
         # OFFSET, so page 5,000 costs the same as page 1.
